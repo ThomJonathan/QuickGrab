@@ -1,344 +1,586 @@
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, after_this_request
-import yt_dlp
 import os
-import threading
+import re
+import sys
+import time
 import uuid
-from datetime import datetime
 import shutil
-import tempfile
 import zipfile
+import threading
+from datetime import datetime
+from typing import Dict, Any, Optional
+
+from flask import (
+    Flask,
+    render_template,
+    request,
+    jsonify,
+    send_file,
+    after_this_request,
+    Response,
+)
+import yt_dlp
 
 app = Flask(__name__)
 
-# Create downloads directory if it doesn't exist
-DOWNLOAD_DIR = "downloads"
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
+# Base downloads directory
+DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Store download status
-download_status = {}
+# Prepend local bin directory to PATH if present (used for Render static ffmpeg)
+LOCAL_BIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+if os.path.exists(LOCAL_BIN):
+    os.environ["PATH"] = f"{LOCAL_BIN}:{os.environ.get('PATH', '')}"
+
+# In-memory store for active and completed download tasks
+# Maps download_id -> DownloadTask instance
+downloads_lock = threading.Lock()
+download_tasks: Dict[str, "DownloadTask"] = {}
+
+# Common options for yt-dlp to ensure stability, bypass common blocks, and avoid bot detection
+BASE_YTDL_OPTS: Dict[str, Any] = {
+    "quiet": True,
+    "no_warnings": True,
+    "force_ipv4": True,
+    "socket_timeout": 30,
+    "retries": 10,
+    "fragment_retries": 10,
+    "http_headers": {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Mode": "navigate",
+    },
+    # Youtube player clients to avoid bot detection
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["web", "android"],
+            "skip": ["dash", "hls"],
+        }
+    },
+}
+
+# If a cookies file is placed in workspace (e.g. cookies.txt), use it automatically
+COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+if os.path.exists(COOKIES_FILE):
+    BASE_YTDL_OPTS["cookiefile"] = COOKIES_FILE
 
 
-class DownloadProgress:
-    def __init__(self, download_id):
+def sanitize_filename(name: str) -> str:
+    """Sanitize filename to prevent directory traversal and remove illegal chars."""
+    if not name:
+        return "download"
+    clean = re.sub(r'[\\/*?:"<>|]', "", name).strip()
+    return clean[:120] if clean else "download"
+
+
+def format_duration(seconds: Optional[int]) -> str:
+    """Format duration in seconds to mm:ss or hh:mm:ss."""
+    if not seconds or seconds <= 0:
+        return "Live / Unknown"
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def format_bytes(bytes_count: Optional[float]) -> str:
+    """Format bytes into human-readable string (KB, MB, GB)."""
+    if not bytes_count or bytes_count <= 0:
+        return "0 KB"
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if bytes_count < 1024.0:
+            return f"{bytes_count:.1f} {unit}"
+        bytes_count /= 1024.0
+    return f"{bytes_count:.1f} PB"
+
+
+class DownloadTask:
+    def __init__(self, download_id: str, url: str, media_type: str, quality: str, is_playlist: bool):
         self.download_id = download_id
-        self.status = "starting"
-        self.progress = 0
+        self.url = url
+        self.media_type = media_type  # 'video' or 'audio'
+        self.quality = quality
+        self.is_playlist = is_playlist
+        
+        self.status = "starting"  # starting, downloading, processing, completed, error, cancelled
+        self.progress = 0.0  # 0 to 100
+        self.speed_str = ""
+        self.eta_str = ""
         self.filename = ""
-        self.error = None
-        self.total_files = 0
+        self.file_path = ""
+        self.error_msg = ""
+        
+        self.total_files = 1
         self.downloaded_files = 0
+        self.title = ""
+        self.created_at = time.time()
+        self.cancelled = False
 
-
-def progress_hook(d, download_id):
-    """Progress hook for yt-dlp"""
-    if download_id in download_status:
-        if d['status'] == 'downloading':
-            if 'total_bytes' in d and d['total_bytes']:
-                download_status[download_id].progress = (d['downloaded_bytes'] / d['total_bytes']) * 100
-            download_status[download_id].status = "downloading"
-            download_status[download_id].filename = os.path.basename(d.get('filename', ''))
-        elif d['status'] == 'finished':
-            download_status[download_id].downloaded_files += 1
-            download_status[download_id].filename = os.path.basename(d.get('filename', ''))
-            # Update progress based on files downloaded
-            if download_status[download_id].total_files > 0:
-                download_status[download_id].progress = (download_status[download_id].downloaded_files /
-                                                         download_status[download_id].total_files) * 100
-
-
-def get_playlist_info(url):
-    """Get playlist information to determine total number of videos"""
-    try:
-        ydl_opts = {
-            'quiet': True,
-            'extract_flat': True,
-            'force-ipv4': True,
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "download_id": self.download_id,
+            "status": self.status,
+            "progress": round(self.progress, 1),
+            "speed": self.speed_str,
+            "eta": self.eta_str,
+            "filename": self.filename,
+            "error": self.error_msg,
+            "total_files": self.total_files,
+            "downloaded_files": self.downloaded_files,
+            "download_url": f"/api/file/{self.download_id}" if self.status == "completed" else None,
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if 'entries' in info:
-                return len(list(info['entries']))
+
+def ytdl_progress_hook(d: Dict[str, Any], task: DownloadTask):
+    """Callback hook invoked by yt-dlp during download."""
+    if task.cancelled:
+        raise Exception("Download cancelled by user")
+
+    status = d.get("status")
+    if status == "downloading":
+        task.status = "downloading"
+        # Downloaded bytes & total bytes
+        downloaded = d.get("downloaded_bytes", 0)
+        total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
+
+        if total and total > 0:
+            file_percent = (downloaded / total) * 100
+            if task.total_files > 1:
+                # Weighted progress across multiple playlist items
+                completed_portion = (task.downloaded_files / task.total_files) * 100
+                current_portion = (1.0 / task.total_files) * file_percent
+                task.progress = min(99.0, completed_portion + current_portion)
             else:
-                return 1  # Single video
-    except:
-        return 1
+                task.progress = min(99.0, file_percent)
+
+        # Speed formatting
+        speed = d.get("speed")
+        if speed:
+            task.speed_str = f"{format_bytes(speed)}/s"
+
+        # ETA formatting
+        eta = d.get("eta")
+        if eta is not None:
+            task.eta_str = format_duration(int(eta))
+
+        fname = d.get("filename")
+        if fname:
+            task.filename = os.path.basename(fname)
+
+    elif status == "finished":
+        task.status = "processing"
+        task.downloaded_files += 1
+        if task.total_files > 0:
+            task.progress = min(99.0, (task.downloaded_files / task.total_files) * 100)
+        fname = d.get("filename")
+        if fname:
+            task.filename = os.path.basename(fname)
 
 
-def download_single_video(url, download_id):
-    try:
-        download_status[download_id].total_files = 1
+def ytdl_postprocessor_hook(d: Dict[str, Any], task: DownloadTask):
+    """Callback hook for ffmpeg merging and audio conversion."""
+    if task.cancelled:
+        raise Exception("Download cancelled by user")
 
-        ydl_opts = {
-            'outtmpl': f'{DOWNLOAD_DIR}/{download_id}/%(title)s.%(ext)s',
-            'format': 'bestvideo+bestaudio/best',
-            'merge_output_format': 'mp4',
-            'force-ipv4': True,
-            'socket_timeout': 30,
-            'retries': 10,
-            'progress_hooks': [lambda d: progress_hook(d, download_id)],
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-
-        download_status[download_id].status = "completed"
-
-    except Exception as e:
-        download_status[download_id].status = "error"
-        download_status[download_id].error = str(e)
+    if d.get("status") == "started":
+        task.status = "processing"
 
 
-def download_single_audio(url, download_id):
-    try:
-        download_status[download_id].total_files = 1
-
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': f'{DOWNLOAD_DIR}/{download_id}/%(title)s.%(ext)s',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'force-ipv4': True,
-            'socket_timeout': 30,
-            'retries': 10,
-            'progress_hooks': [lambda d: progress_hook(d, download_id)],
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-
-        download_status[download_id].status = "completed"
-
-    except Exception as e:
-        download_status[download_id].status = "error"
-        download_status[download_id].error = str(e)
+def get_video_format_string(quality: str) -> str:
+    """Map user-selected quality to a robust yt-dlp format string."""
+    q_lower = quality.lower()
+    if "1080" in q_lower:
+        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+    elif "720" in q_lower:
+        return "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+    elif "480" in q_lower:
+        return "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+    else:  # Best available or default
+        return "bestvideo+bestaudio/best"
 
 
-def download_playlist_videos(url, download_id):
-    try:
-        # Get playlist info first
-        total_files = get_playlist_info(url)
-        download_status[download_id].total_files = total_files
-
-        ydl_opts = {
-            'format': 'bestvideo+bestaudio/best',
-            'merge_output_format': 'mp4',  # Ensure output is MP4
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',  # Convert to MP4 if not already
-            }],
-            'outtmpl': f'{DOWNLOAD_DIR}/{download_id}/%(playlist_title)s/%(title)s.%(ext)s',
-            'force-ipv4': True,
-            'socket_timeout': 30,
-            'retries': 10,
-            'noplaylist': False,  # This is crucial for playlist downloads
-            'yes_playlist': True,  # Explicitly enable playlist mode
-            'progress_hooks': [lambda d: progress_hook(d, download_id)],
-            # Add anti-bot detection options similar to AudioPlaylist2.py
-            'sleep_interval': 1,
-            'max_sleep_interval': 3,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-
-        download_status[download_id].status = "completed"
-
-    except Exception as e:
-        download_status[download_id].status = "error"
-        download_status[download_id].error = str(e)
+def get_audio_bitrate(quality: str) -> str:
+    """Map user-selected audio quality to bitrate string."""
+    q_lower = quality.lower()
+    if "320" in q_lower:
+        return "320"
+    elif "128" in q_lower:
+        return "128"
+    return "192"  # Standard default
 
 
-def download_playlist_audio(url, download_id):
-    try:
-        # Get playlist info first
-        total_files = get_playlist_info(url)
-        download_status[download_id].total_files = total_files
-
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': f'{DOWNLOAD_DIR}/{download_id}/%(playlist_title)s/%(title)s.%(ext)s',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'force-ipv4': True,
-            'socket_timeout': 30,
-            'retries': 10,
-            'noplaylist': False,  # This is crucial for playlist downloads
-            'yes_playlist': True,  # Explicitly enable playlist mode
-            'ignoreerrors': True,  # Continue on download errors
-            'progress_hooks': [lambda d: progress_hook(d, download_id)],
-            # Add anti-bot detection options similar to AudioPlaylist2.py
-            'sleep_interval': 1,
-            'max_sleep_interval': 3,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ApgleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        }
-
-        # Try with browser cookies first (like in AudioPlaylist2.py)
-        try:
-            ydl_opts['cookiesfrombrowser'] = ('chrome',)
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-        except Exception as cookie_error:
-            print(f"Cookie method failed, trying without: {cookie_error}")
-            # Fallback without cookies
-            del ydl_opts['cookiesfrombrowser']
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-
-        download_status[download_id].status = "completed"
-
-    except Exception as e:
-        download_status[download_id].status = "error"
-        download_status[download_id].error = str(e)
-
-
-def create_zip_from_directory(directory_path, zip_filename):
-    """Create a zip file from a directory"""
-    with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(directory_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                # Create relative path for zip
-                arcname = os.path.relpath(file_path, directory_path)
-                zipf.write(file_path, arcname)
-
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-
-@app.route('/download', methods=['POST'])
-def start_download():
-    data = request.json
-    url = data.get('url', '').strip()
-    download_type = data.get('type', 'single_video')
-
-    if not url:
-        return jsonify({'error': 'URL is required'}), 400
-
-    # Generate unique download ID
-    download_id = str(uuid.uuid4())
-    download_status[download_id] = DownloadProgress(download_id)
-
-    # Create download directory for this session
-    session_dir = os.path.join(DOWNLOAD_DIR, download_id)
+def run_download_thread(task: DownloadTask):
+    """Background worker executing the download using yt-dlp."""
+    session_dir = os.path.join(DOWNLOAD_DIR, task.download_id)
     os.makedirs(session_dir, exist_ok=True)
 
-    # Start download in background thread
-    if download_type == 'single_video':
-        thread = threading.Thread(target=download_single_video, args=(url, download_id))
-    elif download_type == 'single_audio':
-        thread = threading.Thread(target=download_single_audio, args=(url, download_id))
-    elif download_type == 'playlist_videos':
-        thread = threading.Thread(target=download_playlist_videos, args=(url, download_id))
-    elif download_type == 'playlist_audio':
-        thread = threading.Thread(target=download_playlist_audio, args=(url, download_id))
-    else:
-        return jsonify({'error': 'Invalid download type'}), 400
+    try:
+        ydl_opts = dict(BASE_YTDL_OPTS)
+        ydl_opts["progress_hooks"] = [lambda d: ytdl_progress_hook(d, task)]
+        ydl_opts["postprocessor_hooks"] = [lambda d: ytdl_postprocessor_hook(d, task)]
 
-    thread.daemon = True
-    thread.start()
+        if task.is_playlist:
+            # Playlist settings
+            ydl_opts["noplaylist"] = False
+            ydl_opts["yes_playlist"] = True
+            ydl_opts["ignoreerrors"] = True
 
-    return jsonify({'download_id': download_id})
-
-
-@app.route('/status/<download_id>')
-def get_status(download_id):
-    if download_id not in download_status:
-        return jsonify({'error': 'Download not found'}), 404
-
-    progress = download_status[download_id]
-    return jsonify({
-        'status': progress.status,
-        'progress': progress.progress,
-        'filename': progress.filename,
-        'error': progress.error,
-        'total_files': progress.total_files,
-        'downloaded_files': progress.downloaded_files
-    })
-
-
-@app.route('/download/<download_id>')
-def download_file(download_id):
-    if download_id not in download_status:
-        return jsonify({'error': 'Download not found'}), 404
-
-    progress = download_status[download_id]
-    if progress.status != 'completed':
-        return jsonify({'error': 'Download not completed'}), 400
-
-    session_dir = os.path.join(DOWNLOAD_DIR, download_id)
-
-    # Count files in the directory
-    total_files = 0
-    files_list = []
-    for root, dirs, files in os.walk(session_dir):
-        for file in files:
-            total_files += 1
-            files_list.append(os.path.join(root, file))
-
-    if total_files == 0:
-        return jsonify({'error': 'No files found'}), 404
-    elif total_files == 1:
-        # Single file - send directly
-        file_path = files_list[0]
-        original_filename = os.path.basename(file_path)
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=original_filename,
-            mimetype='application/octet-stream'
-        )
-    else:
-        # Multiple files - create and send zip
-        zip_filename = f"{download_id}_playlist.zip"
-        zip_path = os.path.join(DOWNLOAD_DIR, zip_filename)
-
-        try:
-            create_zip_from_directory(session_dir, zip_path)
-
-            @after_this_request
-            def remove_zip(response):
-                try:
-                    os.remove(zip_path)
-                except Exception:
-                    pass
-                return response
-
-            return send_file(
-                zip_path,
-                as_attachment=True,
-                download_name=zip_filename,
-                mimetype='application/zip'
+            target_files_dir = os.path.join(session_dir, "files")
+            os.makedirs(target_files_dir, exist_ok=True)
+            ydl_opts["outtmpl"] = os.path.join(
+                target_files_dir, "%(playlist_index|01)02d - %(title)s.%(ext)s"
             )
-        except Exception as e:
-            return jsonify({'error': f'Error creating zip file: {str(e)}'}), 500
+
+            if task.media_type == "audio":
+                bitrate = get_audio_bitrate(task.quality)
+                ydl_opts["format"] = "bestaudio/best"
+                ydl_opts["postprocessors"] = [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": bitrate,
+                    }
+                ]
+            else:
+                ydl_opts["format"] = get_video_format_string(task.quality)
+                ydl_opts["merge_output_format"] = "mp4"
+
+            # Execute playlist download
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([task.url])
+
+            if task.cancelled:
+                return
+
+            task.status = "processing"
+            task.speed_str = "Creating ZIP archive..."
+
+            # Find all files in target_files_dir and zip them
+            collected_files = []
+            for root, _, files in os.walk(target_files_dir):
+                for f in files:
+                    if not f.startswith("."):
+                        collected_files.append(os.path.join(root, f))
+
+            if not collected_files:
+                raise Exception("No playlist files could be downloaded. The playlist might be private or empty.")
+
+            playlist_name = sanitize_filename(task.title or "playlist")
+            zip_filename = f"{playlist_name}_{task.media_type}.zip"
+            zip_path = os.path.join(session_dir, zip_filename)
+
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for file_path in collected_files:
+                    arcname = os.path.basename(file_path)
+                    zipf.write(file_path, arcname)
+
+            task.file_path = zip_path
+            task.filename = zip_filename
+            task.progress = 100.0
+            task.status = "completed"
+
+        else:
+            # Single video/audio settings
+            task.total_files = 1
+            ydl_opts["noplaylist"] = True
+
+            if task.media_type == "audio":
+                bitrate = get_audio_bitrate(task.quality)
+                ydl_opts["format"] = "bestaudio/best"
+                ydl_opts["outtmpl"] = os.path.join(session_dir, "%(title)s.%(ext)s")
+                ydl_opts["postprocessors"] = [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": bitrate,
+                    }
+                ]
+            else:
+                ydl_opts["format"] = get_video_format_string(task.quality)
+                ydl_opts["outtmpl"] = os.path.join(session_dir, "%(title)s.%(ext)s")
+                ydl_opts["merge_output_format"] = "mp4"
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([task.url])
+
+            if task.cancelled:
+                return
+
+            # Find downloaded output file
+            found_files = [
+                f for f in os.listdir(session_dir)
+                if os.path.isfile(os.path.join(session_dir, f)) and not f.startswith(".")
+            ]
+
+            if not found_files:
+                raise Exception("File conversion or download failed. Please verify the link.")
+
+            # Pick the primary file (preferred mp4 or mp3, or largest file)
+            chosen_file = found_files[0]
+            if len(found_files) > 1:
+                # Prefer mp4/mp3
+                preferred = [f for f in found_files if f.endswith(".mp4") or f.endswith(".mp3")]
+                if preferred:
+                    chosen_file = preferred[0]
+                else:
+                    chosen_file = max(
+                        found_files,
+                        key=lambda f: os.path.getsize(os.path.join(session_dir, f)),
+                    )
+
+            task.file_path = os.path.join(session_dir, chosen_file)
+            task.filename = chosen_file
+            task.progress = 100.0
+            task.status = "completed"
+
+    except Exception as e:
+        if task.cancelled:
+            task.status = "cancelled"
+            task.error_msg = "Download was cancelled."
+        else:
+            task.status = "error"
+            err = str(e)
+            # Make errors user-friendly
+            if "Private video" in err:
+                task.error_msg = "This video is private or unavailable."
+            elif "Sign in to confirm you’re not a bot" in err:
+                task.error_msg = "Platform requested bot verification. Please try again shortly or use another link."
+            elif "not a valid URL" in err:
+                task.error_msg = "The provided URL is not valid."
+            else:
+                task.error_msg = err
 
 
-@app.route('/cleanup/<download_id>', methods=['POST'])
-def cleanup_download(download_id):
-    if download_id in download_status:
-        del download_status[download_id]
+def cleanup_old_sessions():
+    """Background worker periodically clearing sessions older than 30 minutes."""
+    while True:
+        try:
+            time.sleep(300)  # Check every 5 minutes
+            now = time.time()
+            cutoff = now - (30 * 60)  # 30 minutes
+
+            with downloads_lock:
+                expired_ids = [
+                    d_id for d_id, t in download_tasks.items()
+                    if t.created_at < cutoff
+                ]
+
+                for d_id in expired_ids:
+                    del download_tasks[d_id]
+                    s_dir = os.path.join(DOWNLOAD_DIR, d_id)
+                    if os.path.exists(s_dir):
+                        try:
+                            shutil.rmtree(s_dir)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+
+# Launch background cleaner daemon
+cleaner_thread = threading.Thread(target=cleanup_old_sessions, daemon=True)
+cleaner_thread.start()
+
+
+# -------------------------------------------------------------
+# Routes
+# -------------------------------------------------------------
+
+@app.route("/")
+def index():
+    """Render the main application page."""
+    return render_template("index.html")
+
+
+@app.route("/api/analyze", methods=["POST"])
+def analyze_url():
+    """Extract metadata (title, thumbnail, duration, playlist status) from URL without downloading."""
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+
+    if not url:
+        return jsonify({"success": False, "error": "Please provide a valid URL"}), 400
+
+    ydl_opts = dict(BASE_YTDL_OPTS)
+    ydl_opts["extract_flat"] = "in_playlist"
+    ydl_opts["skip_download"] = True
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        if not info:
+            return jsonify({"success": False, "error": "Could not retrieve media details."}), 400
+
+        is_playlist = info.get("_type") == "playlist" or "entries" in info
+        title = info.get("title") or "Unknown Title"
+        thumbnail = info.get("thumbnail") or ""
+        duration = info.get("duration") or 0
+        extractor = info.get("extractor_key") or info.get("extractor") or "Web"
+        uploader = info.get("uploader") or info.get("channel") or ""
+
+        item_count = 1
+        if is_playlist:
+            entries = list(info.get("entries") or [])
+            item_count = len(entries)
+            # Try to grab thumbnail from the first item if playlist doesn't have one
+            if not thumbnail and entries and entries[0]:
+                thumbnail = entries[0].get("thumbnail", "")
+
+        return jsonify({
+            "success": True,
+            "title": title,
+            "thumbnail": thumbnail,
+            "duration": duration,
+            "duration_formatted": format_duration(duration),
+            "is_playlist": is_playlist,
+            "item_count": item_count,
+            "extractor": extractor,
+            "uploader": uploader,
+        })
+
+    except Exception as e:
+        err_msg = str(e)
+        if "is not a valid URL" in err_msg:
+            friendly_err = "The link entered is not valid. Please check and try again."
+        elif "Private video" in err_msg:
+            friendly_err = "This video is private or restricted."
+        elif "Unsupported URL" in err_msg:
+            friendly_err = "This website is not currently supported or the link format is invalid."
+        else:
+            friendly_err = f"Could not analyze video: {err_msg.split(';')[-1].strip()}"
+        return jsonify({"success": False, "error": friendly_err}), 400
+
+
+@app.route("/api/download", methods=["POST"])
+def start_download():
+    """Initiate a download in the background."""
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+    media_type = data.get("media_type", "video")  # 'video' or 'audio'
+    quality = data.get("quality", "1080p Full HD")
+    is_playlist = bool(data.get("is_playlist", False))
+    title = data.get("title", "")
+
+    if not url:
+        return jsonify({"success": False, "error": "URL is required"}), 400
+
+    download_id = str(uuid.uuid4())
+    task = DownloadTask(
+        download_id=download_id,
+        url=url,
+        media_type=media_type,
+        quality=quality,
+        is_playlist=is_playlist,
+    )
+    task.title = title
+
+    with downloads_lock:
+        download_tasks[download_id] = task
+
+    # Launch download thread
+    worker = threading.Thread(target=run_download_thread, args=(task,), daemon=True)
+    worker.start()
+
+    return jsonify({"success": True, "download_id": download_id})
+
+
+@app.route("/api/status/<download_id>", methods=["GET"])
+def get_status(download_id: str):
+    """Query progress and status for an ongoing or completed download."""
+    with downloads_lock:
+        task = download_tasks.get(download_id)
+
+    if not task:
+        return jsonify({"error": "Download task not found or expired"}), 404
+
+    return jsonify(task.to_dict())
+
+
+@app.route("/api/file/<download_id>", methods=["GET"])
+def serve_download_file(download_id: str):
+    """Serve the downloaded file (video, audio, or zip archive) to the user's browser."""
+    with downloads_lock:
+        task = download_tasks.get(download_id)
+
+    if not task:
+        return jsonify({"error": "Download task not found or expired"}), 404
+
+    if task.status != "completed" or not task.file_path or not os.path.exists(task.file_path):
+        return jsonify({"error": "File is not ready for download yet."}), 400
+
+    # Determine mimetype
+    filename = task.filename or os.path.basename(task.file_path)
+    if filename.endswith(".mp4"):
+        mimetype = "video/mp4"
+    elif filename.endswith(".mp3"):
+        mimetype = "audio/mpeg"
+    elif filename.endswith(".zip"):
+        mimetype = "application/zip"
+    else:
+        mimetype = "application/octet-stream"
+
+    return send_file(
+        task.file_path,
+        as_attachment=True,
+        download_name=filename,
+        mimetype=mimetype,
+    )
+
+
+@app.route("/api/cancel/<download_id>", methods=["POST"])
+def cancel_download(download_id: str):
+    """Cancel an ongoing download and clean up its temporary files."""
+    with downloads_lock:
+        task = download_tasks.get(download_id)
+        if task:
+            task.cancelled = True
+            task.status = "cancelled"
 
     session_dir = os.path.join(DOWNLOAD_DIR, download_id)
     if os.path.exists(session_dir):
-        shutil.rmtree(session_dir)
+        try:
+            shutil.rmtree(session_dir)
+        except Exception:
+            pass
 
-    return jsonify({'success': True})
+    return jsonify({"success": True})
 
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=3000)
+@app.route("/api/supported-sites", methods=["GET"])
+def get_supported_sites():
+    """Return an extensive list of popular supported platforms."""
+    sites = [
+        {"name": "YouTube", "category": "Video & Music", "badge": "4K / 1080p / MP3", "popular": True},
+        {"name": "TikTok", "category": "Shorts & Social", "badge": "No Watermark / Audio", "popular": True},
+        {"name": "Instagram", "category": "Reels & Stories", "badge": "High Quality", "popular": True},
+        {"name": "Facebook", "category": "Social & Watch", "badge": "HD Video", "popular": True},
+        {"name": "X (Twitter)", "category": "Social & Clips", "badge": "MP4 / Audio", "popular": True},
+        {"name": "Vimeo", "category": "Creative & Film", "badge": "Original / HD", "popular": True},
+        {"name": "SoundCloud", "category": "Music & Audio", "badge": "320kbps MP3", "popular": True},
+        {"name": "Reddit", "category": "Clips & Media", "badge": "Audio + Video merged", "popular": True},
+        {"name": "Twitch", "category": "Streams & Clips", "badge": "VODs & Clips", "popular": True},
+        {"name": "Dailymotion", "category": "Video Hub", "badge": "1080p / 720p", "popular": False},
+        {"name": "Bilibili", "category": "Anime & Video", "badge": "HD Formats", "popular": False},
+        {"name": "Pinterest", "category": "Social Media", "badge": "Video Pins", "popular": False},
+        {"name": "LinkedIn", "category": "Professional", "badge": "Video Posts", "popular": False},
+        {"name": "Threads", "category": "Social Media", "badge": "Video & Clips", "popular": False},
+    ]
+    return jsonify({"sites": sites, "total_supported": "1,000+"})
+
+
+# Healthcheck endpoint for Render
+@app.route("/healthz")
+def healthcheck():
+    return jsonify({"status": "ok", "timestamp": time.time()})
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 3000))
+    app.run(debug=True, host="0.0.0.0", port=port)

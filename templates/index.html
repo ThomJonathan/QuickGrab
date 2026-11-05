@@ -1,479 +1,1260 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="scroll-smooth">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Video/Audio Downloader</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuickGrab — Video & Audio Downloader</title>
+  <meta name="description" content="Download videos, audio, and full playlists easily from YouTube, TikTok, Instagram, Vimeo, and 1,000+ sites. Fast, free, and secure.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23174c36' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3v12'/><path d='m7 10 5 5 5-5'/><path d='M5 21h14'/></svg>">
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+  <!-- Google Fonts: DM Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
 
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            backdrop-filter: blur(10px);
-        }
+  <!-- Local Self-Contained Stylesheet (Loads 100% reliably without CDN dependencies) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 
-        h1 {
-            text-align: center;
-            color: #333;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .form-group {
-            margin-bottom: 25px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #555;
-        }
-
-        input[type="url"] {
-            width: 100%;
-            padding: 15px;
-            border: 2px solid #e1e8ed;
-            border-radius: 10px;
-            font-size: 16px;
-            transition: all 0.3s ease;
-            background: #f8f9fa;
-        }
-
-        input[type="url"]:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-            background: white;
-        }
-
-        .download-options {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-
-        .option-card {
-            background: white;
-            border: 2px solid #e1e8ed;
-            border-radius: 12px;
-            padding: 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-
-        .option-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-            border-color: #667eea;
-        }
-
-        .option-card.selected {
-            border-color: #667eea;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-        }
-
-        .option-card input[type="radio"] {
-            display: none;
-        }
-
-        .option-icon {
-            font-size: 2em;
-            margin-bottom: 10px;
-            display: block;
-        }
-
-        .option-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-
-        .option-desc {
-            font-size: 0.85em;
-            opacity: 0.8;
-        }
-
-        .download-btn {
-            width: 100%;
-            padding: 18px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 12px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .download-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
-        }
-
-        .download-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .progress-container {
-            display: none;
-            margin-top: 30px;
-            padding: 25px;
-            background: #f8f9fa;
-            border-radius: 12px;
-            border: 2px solid #e1e8ed;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 12px;
-            background: #e1e8ed;
-            border-radius: 6px;
-            overflow: hidden;
-            margin-bottom: 15px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            width: 0%;
-            transition: width 0.3s ease;
-            border-radius: 6px;
-        }
-
-        .progress-text {
-            text-align: center;
-            font-weight: 600;
-            color: #555;
-            margin-bottom: 10px;
-        }
-
-        .download-link {
-            display: none;
-            text-align: center;
-            margin-top: 20px;
-        }
-
-        .download-link a {
-            display: inline-block;
-            padding: 15px 30px;
-            background: #28a745;
-            color: white;
-            text-decoration: none;
-            border-radius: 10px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-
-        .download-link a:hover {
-            background: #218838;
-            transform: translateY(-2px);
-        }
-
-        .error {
-            color: #dc3545;
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            display: none;
-        }
-
-        .supported-sites {
-            margin-top: 40px;
-            padding: 25px;
-            background: rgba(102, 126, 234, 0.1);
-            border-radius: 12px;
-        }
-
-        .supported-sites h3 {
-            color: #667eea;
-            margin-bottom: 15px;
-        }
-
-        .sites-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 10px;
-            font-size: 0.9em;
-            color: #666;
-        }
-
-        @media (max-width: 600px) {
-            .container {
-                padding: 20px;
-                margin: 10px;
+  <!-- Tailwind CSS via CDN (Progressive Enhancement) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          screens: {
+            'xs': '432px',
+          },
+          fontFamily: {
+            sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              dark: '#174c36',
+              darkHover: '#1d6044',
+              accent: '#2b7354',
+              lime: '#d8ef5f',
+              limeHover: '#cce64d',
+              limeText: '#233016',
+              bg: '#f7f8f6',
+              text: '#18201c',
             }
-
-            h1 {
-                font-size: 2em;
-            }
-
-            .download-options {
-                grid-template-columns: 1fr;
-            }
+          }
         }
-    </style>
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      min-width: 320px;
+      background: #f7f8f6;
+      font-family: "DM Sans", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, a, select {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .hero-glow {
+      background:
+        radial-gradient(circle at 25% 15%, rgba(216, 239, 95, 0.2), transparent 31%),
+        radial-gradient(circle at 78% 24%, rgba(89, 154, 119, 0.17), transparent 34%);
+      filter: blur(12px);
+    }
+
+    .text-balance {
+      text-wrap: balance;
+    }
+
+    @keyframes reveal {
+      from {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes toast {
+      from {
+        opacity: 0;
+        transform: translate(-50%, 12px);
+      }
+      to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+    }
+
+    .animate-reveal {
+      animation: reveal 0.35s ease-out both;
+    }
+
+    .animate-toast {
+      animation: toast 0.25s ease-out both;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* Modal transitions */
+    .modal-backdrop {
+      background: rgba(20, 32, 25, 0.4);
+      backdrop-filter: blur(6px);
+    }
+  </style>
 </head>
-<body>
-    <div class="container">
-        <h1>🎬 Universal Video/Audio Downloader</h1>
+<body class="min-h-screen overflow-x-hidden bg-[#f7f8f6] text-[#18201c] selection:bg-[#d8ef5f] selection:text-[#233016]">
 
-        <form id="downloadForm">
-            <div class="form-group">
-                <label for="videoUrl">Enter Video/Playlist URL:</label>
-                <input type="url" id="videoUrl" placeholder="https://www.youtube.com/watch?v=..." required>
-            </div>
+  <!-- Site Header -->
+  <header class="relative z-30 border-b border-[#18201c]/8 bg-[#f7f8f6]/90 backdrop-blur-xl sticky top-0">
+    <div class="mx-auto flex h-[76px] max-w-[1240px] items-center justify-between px-5 sm:px-8">
+      
+      <!-- Brand Logo -->
+      <a class="group flex items-center gap-3" href="#" aria-label="QuickGrab home">
+        <span class="grid size-10 place-items-center rounded-xl bg-[#174c36] text-white shadow-[0_8px_24px_rgba(23,76,54,.18)] transition-transform group-hover:-translate-y-0.5">
+          <!-- Down arrow SVG matching Figma -->
+          <svg class="rotate-90" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14" />
+            <path d="m13 6 6 6-6 6" />
+          </svg>
+        </span>
+        <span class="text-[21px] font-bold tracking-[-.04em] text-[#18201c]">QuickGrab</span>
+      </a>
 
-            <div class="form-group">
-                <label>Select Download Type:</label>
-                <div class="download-options">
-                    <div class="option-card" onclick="selectOption('single_video')">
-                        <input type="radio" name="downloadType" value="single_video" checked>
-                        <span class="option-icon">🎥</span>
-                        <div class="option-title">Single Video</div>
-                        <div class="option-desc">Download one video in best quality</div>
-                    </div>
+      <!-- Desktop Nav -->
+      <nav class="hidden items-center gap-8 text-sm font-medium text-[#526158] md:flex">
+        <a class="transition-colors hover:text-[#174c36]" href="#how-it-works">How it works</a>
+        <a class="transition-colors hover:text-[#174c36]" href="#features">Features</a>
+        <a class="transition-colors hover:text-[#174c36]" href="#support">Supported sites</a>
+      </nav>
 
-                    <div class="option-card" onclick="selectOption('single_audio')">
-                        <input type="radio" name="downloadType" value="single_audio">
-                        <span class="option-icon">🎵</span>
-                        <div class="option-title">Single Audio</div>
-                        <div class="option-desc">Extract audio as MP3</div>
-                    </div>
+      <!-- Language Button (Desktop) -->
+      <div class="hidden items-center md:flex">
+        <button
+          id="btn-language"
+          onclick="toggleLanguageModal()"
+          class="grid size-10 place-items-center rounded-full border border-[#dbe1dc] bg-white text-[#405047] transition-all hover:border-[#174c36]/30 hover:text-[#174c36] hover:shadow-sm"
+          aria-label="Change language"
+          title="Change language"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9S14.5 18.3 12 21c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z" />
+          </svg>
+        </button>
+      </div>
 
-                    <div class="option-card" onclick="selectOption('playlist_videos')">
-                        <input type="radio" name="downloadType" value="playlist_videos">
-                        <span class="option-icon">📺</span>
-                        <div class="option-title">Playlist Videos</div>
-                        <div class="option-desc">Download all videos from playlist</div>
-                    </div>
-
-                    <div class="option-card" onclick="selectOption('playlist_audio')">
-                        <input type="radio" name="downloadType" value="playlist_audio">
-                        <span class="option-icon">🎼</span>
-                        <div class="option-title">Playlist Audio</div>
-                        <div class="option-desc">Extract audio from all playlist videos</div>
-                    </div>
-                </div>
-            </div>
-
-            <button type="submit" class="download-btn" id="downloadBtn">
-                🚀 Start Download
-            </button>
-        </form>
-
-        <div class="progress-container" id="progressContainer">
-            <div class="progress-text" id="progressText">Preparing download...</div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
-            <div class="download-link" id="downloadLink">
-                <a href="#" id="downloadFileBtn">📥 Download File</a>
-            </div>
-        </div>
-
-        <div class="error" id="errorMessage"></div>
-
-        <div class="supported-sites">
-            <h3>🌐 Supported Websites</h3>
-            <div class="sites-grid">
-                <div>YouTube</div>
-                <div>Facebook</div>
-                <div>Twitter</div>
-                <div>Instagram</div>
-                <div>TikTok</div>
-                <div>Vimeo</div>
-                <div>Dailymotion</div>
-                <div>Reddit</div>
-                <div>Twitch</div>
-                <div>And 1000+ more!</div>
-            </div>
-        </div>
+      <!-- Mobile Hamburger Button -->
+      <button
+        id="btn-mobile-menu"
+        class="grid size-10 place-items-center rounded-full border border-[#dbe1dc] bg-white text-[#405047] transition-colors hover:text-[#174c36] md:hidden"
+        aria-controls="mobile-navigation"
+        aria-expanded="false"
+        aria-label="Open menu"
+        onclick="toggleMobileMenu()"
+      >
+        <span id="icon-menu-open">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </span>
+        <span id="icon-menu-close" class="hidden">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </span>
+      </button>
     </div>
 
-    <script>
-        let currentDownloadId = null;
-        let statusInterval = null;
+    <!-- Mobile Navigation Dropdown -->
+    <nav
+      id="mobile-navigation"
+      class="hidden animate-reveal border-t border-[#18201c]/8 bg-[#f7f8f6] px-5 pb-5 pt-3 md:hidden"
+    >
+      <div class="mx-auto flex max-w-[1240px] flex-col">
+        <a class="flex min-h-12 items-center justify-between border-b border-[#18201c]/6 text-sm font-semibold text-[#3d4b42]" href="#how-it-works" onclick="closeMobileMenu()">
+          How it works
+          <svg class="text-[#87938b]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14" /><path d="m13 6 6 6-6 6" />
+          </svg>
+        </a>
+        <a class="flex min-h-12 items-center justify-between border-b border-[#18201c]/6 text-sm font-semibold text-[#3d4b42]" href="#features" onclick="closeMobileMenu()">
+          Features
+          <svg class="text-[#87938b]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14" /><path d="m13 6 6 6-6 6" />
+          </svg>
+        </a>
+        <a class="flex min-h-12 items-center justify-between text-sm font-semibold text-[#3d4b42]" href="#support" onclick="closeMobileMenu()">
+          Supported sites
+          <svg class="text-[#87938b]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14" /><path d="m13 6 6 6-6 6" />
+          </svg>
+        </a>
+      </div>
+    </nav>
+  </header>
 
-        function selectOption(type) {
-            // Remove selected class from all cards
-            document.querySelectorAll('.option-card').forEach(card => {
-                card.classList.remove('selected');
-            });
+  <!-- Main Content -->
+  <main>
+    <!-- Hero Section -->
+    <section class="relative px-5 pb-20 pt-16 sm:px-8 sm:pt-20 lg:pb-24 lg:pt-24">
+      <div class="hero-glow pointer-events-none absolute inset-x-0 top-0 mx-auto h-[650px] max-w-[1100px]"></div>
+      
+      <div class="relative mx-auto max-w-[980px]">
+        
+        <!-- Hero Header Text -->
+        <div class="mx-auto max-w-[790px] text-center">
+          <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-[#174c36]/12 bg-white/70 px-3.5 py-2 text-xs font-semibold text-[#174c36] shadow-sm backdrop-blur">
+            <!-- Sparkles SVG -->
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2z" />
+              <path d="m19 15 .7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7zM5 2l.6 1.5L7 4l-1.4.5L5 6l-.6-1.5L3 4l1.4-.5z" />
+            </svg>
+            Simple, fast and beautifully easy
+          </div>
 
-            // Add selected class to clicked card
-            event.currentTarget.classList.add('selected');
+          <h1 class="text-balance text-[44px] font-bold leading-[1.02] tracking-[-.055em] text-[#142019] sm:text-[64px] lg:text-[76px]">
+            Your favorite videos,
+            <span class="block text-[#2b7354]">ready when you are.</span>
+          </h1>
 
-            // Update radio button
-            document.querySelector(`input[value="${type}"]`).checked = true;
+          <p class="mx-auto mt-6 max-w-[620px] text-balance text-base leading-7 text-[#647168] sm:text-lg">
+            Download videos, audio, and entire playlists from your favorite sites. Just paste a link and choose your format.
+          </p>
+        </div>
+
+        <!-- Main Interactive QuickGrab Card -->
+        <div class="relative mx-auto mt-11 max-w-[900px] rounded-[26px] border border-white/80 bg-white/86 p-2.5 shadow-[0_24px_80px_rgba(31,66,49,.12),0_3px_12px_rgba(31,66,49,.05)] backdrop-blur-xl sm:p-3">
+          
+          <!-- Input + Paste + Action Button Row -->
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <!-- Input container -->
+            <div class="flex min-h-14 flex-1 items-center gap-3 rounded-[17px] bg-[#f3f5f2] px-4 ring-1 ring-inset ring-[#e8ece8] transition-shadow focus-within:ring-2 focus-within:ring-[#2b7354]/40 sm:min-h-[62px] sm:px-5">
+              <!-- Link icon -->
+              <svg class="shrink-0 text-[#718078]" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1" />
+                <path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1" />
+              </svg>
+
+              <!-- URL Input -->
+              <input
+                id="url-input"
+                class="min-w-0 flex-1 bg-transparent text-[15px] text-[#1a241e] outline-none placeholder:text-[#91a097]"
+                type="url"
+                placeholder="Paste your video or playlist link here"
+                autocomplete="off"
+                spellcheck="false"
+              />
+
+              <!-- Paste Button -->
+              <button
+                id="btn-paste"
+                type="button"
+                class="flex shrink-0 items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#435148] shadow-sm ring-1 ring-[#dfe4df] transition-all hover:text-[#174c36] hover:shadow"
+                onclick="handlePasteClick()"
+                title="Paste from clipboard"
+              >
+                <!-- Paste icon -->
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 5h6v3H9z" />
+                  <path d="M7 6H5v16h14V6h-2" />
+                </svg>
+                <span class="hidden xs:inline">Paste</span>
+              </button>
+            </div>
+
+            <!-- Grab Video Button -->
+            <button
+              id="btn-fetch"
+              type="button"
+              class="flex min-h-14 items-center justify-center gap-2 rounded-[17px] bg-[#174c36] px-7 text-sm font-semibold text-white shadow-[0_9px_24px_rgba(23,76,54,.22)] transition-all hover:-translate-y-0.5 hover:bg-[#1d6044] disabled:cursor-wait disabled:opacity-80 sm:min-h-[62px]"
+              onclick="handleAnalyzeClick()"
+            >
+              <span id="fetch-btn-text">Grab video</span>
+              <span id="fetch-btn-icon">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12h14" />
+                  <path d="m13 6 6 6-6 6" />
+                </svg>
+              </span>
+              <span id="fetch-btn-spinner" class="hidden">
+                <svg class="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+              </span>
+            </button>
+          </div>
+
+          <!-- Result Preview Card (shown after analysis) -->
+          <div id="result-card" class="hidden animate-reveal mx-1 mb-1 mt-3 rounded-[20px] border border-[#e6eae6] bg-[#fbfcfb] p-4 sm:p-5">
+            <div class="flex flex-col gap-5 lg:flex-row lg:items-center">
+              
+              <!-- Thumbnail box -->
+              <div class="relative h-[150px] overflow-hidden rounded-2xl bg-[#dce7df] sm:h-[170px] lg:h-[112px] lg:w-[200px] lg:shrink-0">
+                <div id="thumb-gradient" class="absolute inset-0 bg-[linear-gradient(135deg,#bdd0c3,#edf1ed_55%,#87a996)]"></div>
+                <img id="thumb-img" class="absolute inset-0 h-full w-full object-cover hidden" alt="Video thumbnail" />
+                <div class="absolute -bottom-8 -left-4 size-32 rounded-full bg-[#174c36]/25 blur-xl"></div>
+                
+                <!-- Play button indicator -->
+                <div class="absolute inset-0 grid place-items-center">
+                  <span class="grid size-11 place-items-center rounded-full bg-white/90 text-[#174c36] shadow-lg backdrop-blur">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m9 7 8 5-8 5z" />
+                    </svg>
+                  </span>
+                </div>
+
+                <!-- Playlist / Duration badge -->
+                <span id="media-badge" class="absolute bottom-2 right-2 rounded-lg bg-[#142019]/80 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm">
+                  12:48
+                </span>
+              </div>
+
+              <!-- Media details -->
+              <div class="min-w-0 flex-1">
+                <p class="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[.12em] text-[#2b7354]">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m5 12 4 4L19 6" />
+                  </svg>
+                  Ready to download
+                </p>
+                <h3 id="media-title" class="truncate text-base font-bold tracking-[-.02em] sm:text-lg text-[#18201c]" title="Video Title">
+                  Your video is ready
+                </h3>
+                <p id="media-subtitle" class="mt-1 text-sm text-[#7a867e]">
+                  12:48 · 1080p Full HD
+                </p>
+              </div>
+
+              <!-- Download Button -->
+              <div class="flex flex-col sm:flex-row lg:flex-col gap-2 shrink-0">
+                <button
+                  id="btn-download"
+                  type="button"
+                  class="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#d8ef5f] px-6 text-sm font-bold text-[#233016] shadow-sm transition-all hover:bg-[#cce64d] hover:shadow disabled:opacity-75 disabled:cursor-wait"
+                  onclick="handleStartDownload()"
+                >
+                  <svg id="download-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3v12" />
+                    <path d="m7 10 5 5 5-5" />
+                    <path d="M5 21h14" />
+                  </svg>
+                  <span id="download-btn-text">Download now</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Download Progress Bar Container (active during download) -->
+            <div id="progress-container" class="hidden mt-4 pt-4 border-t border-[#e6eae6]">
+              <div class="flex items-center justify-between text-xs font-semibold text-[#526158] mb-2">
+                <span id="progress-status-text" class="flex items-center gap-2 text-[#174c36]">
+                  <svg class="animate-spin text-[#174c36]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                  </svg>
+                  Downloading media...
+                </span>
+                <span id="progress-metrics-text" class="text-[#718078] font-mono">0% · -- MB/s</span>
+              </div>
+              <div class="h-2 w-full overflow-hidden rounded-full bg-[#e8ece8]">
+                <div id="progress-fill" class="h-full bg-[#174c36] transition-all duration-300 rounded-full" style="width: 0%"></div>
+              </div>
+              <div class="mt-2.5 flex items-center justify-between">
+                <p id="progress-filename" class="text-[11px] text-[#87938b] truncate max-w-[70%]"></p>
+                <button id="btn-cancel-download" class="text-[11px] font-semibold text-rose-600 hover:underline" onclick="cancelCurrentDownload()">Cancel</button>
+              </div>
+            </div>
+
+            <!-- Complete Success Banner -->
+            <div id="complete-banner" class="hidden mt-4 p-3 rounded-xl bg-[#edf7f0] border border-[#c1e7cb] flex items-center justify-between gap-3 text-xs font-semibold text-[#1d6044]">
+              <span class="flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m5 12 4 4L19 6" />
+                </svg>
+                File downloaded successfully to your device!
+              </span>
+              <a id="btn-save-again" href="#" class="rounded-lg bg-[#174c36] text-white px-3 py-1.5 font-bold hover:bg-[#1d6044] transition-colors whitespace-nowrap">
+                Save File Again
+              </a>
+            </div>
+          </div>
+
+          <!-- Controls Row: Video / Audio Pill + Playlist Toggle + Quality Select -->
+          <div class="flex flex-col gap-4 px-2 pb-1 pt-4 sm:flex-row sm:items-center sm:justify-between sm:px-3">
+            
+            <!-- Format selector pills -->
+            <div class="flex items-center gap-1 rounded-xl bg-[#f0f2ef] p-1">
+              <button
+                id="btn-format-video"
+                type="button"
+                class="flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all bg-white text-[#174c36] shadow-sm sm:flex-none"
+                onclick="setMediaType('video')"
+              >
+                <!-- Video icon -->
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="5" width="15" height="14" rx="2" />
+                  <path d="m18 10 4-2v8l-4-2z" />
+                </svg>
+                Video
+              </button>
+              <button
+                id="btn-format-audio"
+                type="button"
+                class="flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all text-[#748078] hover:text-[#33423a] sm:flex-none"
+                onclick="setMediaType('audio')"
+              >
+                <!-- Headphones icon -->
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
+                  <path d="M4 14h3v6H4zM17 14h3v6h-3z" />
+                </svg>
+                Audio only
+              </button>
+            </div>
+
+            <!-- Right Options: Playlist toggle & Quality select -->
+            <div class="flex flex-wrap items-center justify-between gap-3 sm:justify-end">
+              
+              <!-- Playlist switch -->
+              <label class="flex cursor-pointer items-center gap-2.5 text-xs font-semibold text-[#59665e] select-none">
+                <button
+                  id="playlist-toggle"
+                  type="button"
+                  role="switch"
+                  aria-checked="false"
+                  class="relative h-6 w-11 rounded-full bg-[#d9ded9] transition-colors focus:outline-none"
+                  onclick="togglePlaylist()"
+                >
+                  <span
+                    id="playlist-thumb"
+                    class="absolute left-1 top-1 size-4 rounded-full bg-white shadow-sm transition-transform translate-x-0"
+                  ></span>
+                </button>
+                Playlist
+              </label>
+
+              <!-- Divider line -->
+              <span class="hidden h-5 w-px bg-[#dfe4df] sm:block"></span>
+
+              <!-- Quality dropdown -->
+              <label class="relative flex items-center gap-2 text-xs font-semibold text-[#59665e]">
+                <span class="text-[#8b968f]">Quality</span>
+                <select
+                  id="quality-select"
+                  class="cursor-pointer appearance-none bg-transparent py-1 pr-5 font-semibold text-[#344139] outline-none"
+                  onchange="handleQualityChange(this.value)"
+                >
+                  <option value="1080p Full HD">1080p Full HD</option>
+                  <option value="720p HD">720p HD</option>
+                  <option value="480p">480p</option>
+                  <option value="Best available">Best available</option>
+                </select>
+                <!-- Chevron icon -->
+                <svg class="pointer-events-none absolute right-0 text-[#8b968f]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m8 10 4 4 4-4" />
+                </svg>
+              </label>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Trust Features Row -->
+        <div class="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-xs font-medium text-[#77837b]">
+          <span class="flex items-center gap-1.5">
+            <!-- Shield icon -->
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-3.7 8-10V5l-8-3-8 3v7c0 6.3 8 10 8 10Z" />
+              <path d="m8.5 12 2.2 2.2 4.8-5" />
+            </svg>
+            Private & secure
+          </span>
+          <span class="size-1 rounded-full bg-[#b9c2bc]"></span>
+          <span>No sign-up needed</span>
+          <span class="size-1 rounded-full bg-[#b9c2bc]"></span>
+          <span>Free to use</span>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Supported Platforms Section -->
+    <section class="border-y border-[#e5e9e5] bg-white/60 px-5 py-8 sm:px-8" id="support">
+      <div class="mx-auto flex max-w-[1100px] flex-col items-center gap-6 lg:flex-row lg:justify-between">
+        <p class="text-xs font-bold uppercase tracking-[.15em] text-[#859088]">
+          Works with the sites you love
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 sm:gap-x-12">
+          <span class="text-sm font-bold tracking-[-.02em] text-[#89938c] transition-colors hover:text-[#3f4b44]">YouTube</span>
+          <span class="text-sm font-bold tracking-[-.02em] text-[#89938c] transition-colors hover:text-[#3f4b44]">Vimeo</span>
+          <span class="text-sm font-bold tracking-[-.02em] text-[#89938c] transition-colors hover:text-[#3f4b44]">Facebook</span>
+          <span class="text-sm font-bold tracking-[-.02em] text-[#89938c] transition-colors hover:text-[#3f4b44]">TikTok</span>
+          <span class="text-sm font-bold tracking-[-.02em] text-[#89938c] transition-colors hover:text-[#3f4b44]">X</span>
+          <span class="text-sm font-bold tracking-[-.02em] text-[#89938c] transition-colors hover:text-[#3f4b44]">Instagram</span>
+          <button onclick="openSupportedModal()" class="text-xs font-semibold text-[#2b7354] hover:underline focus:outline-none">
+            + 1,000 more
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section class="px-5 py-20 sm:px-8 lg:py-28" id="how-it-works">
+      <div class="mx-auto max-w-[1100px]">
+        <div class="grid gap-12 lg:grid-cols-[.8fr_1.2fr] lg:items-end">
+          <div>
+            <p class="mb-3 text-xs font-bold uppercase tracking-[.16em] text-[#2b7354]">
+              How it works
+            </p>
+            <h2 class="max-w-[460px] text-[36px] font-bold leading-[1.08] tracking-[-.045em] sm:text-[48px] text-[#142019]">
+              From link to offline in three steps.
+            </h2>
+          </div>
+          <p class="max-w-[560px] text-base leading-7 text-[#6f7b73] lg:justify-self-end">
+            No confusing settings or technical jargon. QuickGrab identifies the media, gives you the best format options, and handles the rest.
+          </p>
+        </div>
+
+        <!-- 3 Feature Steps Cards -->
+        <div class="mt-12 grid gap-4 md:grid-cols-3" id="features">
+          
+          <!-- Card 1 -->
+          <article class="group rounded-[24px] border border-[#e3e8e3] bg-white p-7 transition-all hover:-translate-y-1 hover:shadow-[0_16px_40px_rgba(26,55,40,.08)] sm:p-8">
+            <div class="flex items-start justify-between">
+              <span class="grid size-12 place-items-center rounded-2xl bg-[#edf3ee] text-[#174c36] transition-colors group-hover:bg-[#174c36] group-hover:text-white">
+                <!-- Link icon -->
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1" />
+                  <path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1" />
+                </svg>
+              </span>
+              <span class="text-xs font-bold text-[#bac3bc]">01</span>
+            </div>
+            <h3 class="mt-8 text-xl font-bold tracking-[-.03em] text-[#142019]">Copy & paste</h3>
+            <p class="mt-3 text-sm leading-6 text-[#738078]">
+              Grab a link from any supported platform and paste it into the field above.
+            </p>
+          </article>
+
+          <!-- Card 2 -->
+          <article class="group rounded-[24px] border border-[#e3e8e3] bg-white p-7 transition-all hover:-translate-y-1 hover:shadow-[0_16px_40px_rgba(26,55,40,.08)] sm:p-8">
+            <div class="flex items-start justify-between">
+              <span class="grid size-12 place-items-center rounded-2xl bg-[#edf3ee] text-[#174c36] transition-colors group-hover:bg-[#174c36] group-hover:text-white">
+                <!-- File icon -->
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 2h8l4 4v16H6z" />
+                  <path d="M14 2v5h5" />
+                </svg>
+              </span>
+              <span class="text-xs font-bold text-[#bac3bc]">02</span>
+            </div>
+            <h3 class="mt-8 text-xl font-bold tracking-[-.03em] text-[#142019]">Choose your format</h3>
+            <p class="mt-3 text-sm leading-6 text-[#738078]">
+              Pick video or audio, select the quality, and choose a single item or full playlist.
+            </p>
+          </article>
+
+          <!-- Card 3 -->
+          <article class="group rounded-[24px] border border-[#e3e8e3] bg-white p-7 transition-all hover:-translate-y-1 hover:shadow-[0_16px_40px_rgba(26,55,40,.08)] sm:p-8">
+            <div class="flex items-start justify-between">
+              <span class="grid size-12 place-items-center rounded-2xl bg-[#edf3ee] text-[#174c36] transition-colors group-hover:bg-[#174c36] group-hover:text-white">
+                <!-- Download icon -->
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3v12" />
+                  <path d="m7 10 5 5 5-5" />
+                  <path d="M5 21h14" />
+                </svg>
+              </span>
+              <span class="text-xs font-bold text-[#bac3bc]">03</span>
+            </div>
+            <h3 class="mt-8 text-xl font-bold tracking-[-.03em] text-[#142019]">Download</h3>
+            <p class="mt-3 text-sm leading-6 text-[#738078]">
+              Your file is prepared quickly and saved directly to your device.
+            </p>
+          </article>
+
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-[#e1e6e2] px-5 py-8 sm:px-8">
+    <div class="mx-auto flex max-w-[1100px] flex-col items-center justify-between gap-5 text-center sm:flex-row sm:text-left">
+      <div class="flex items-center gap-2.5">
+        <span class="grid size-8 place-items-center rounded-lg bg-[#174c36] text-white">
+          <svg class="rotate-90" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14" />
+            <path d="m13 6 6 6-6 6" />
+          </svg>
+        </span>
+        <span class="font-bold tracking-[-.03em] text-[#18201c]">QuickGrab</span>
+      </div>
+      
+      <p class="max-w-[520px] text-xs leading-5 text-[#849088]">
+        Only download content you own or have permission to use. Please respect creators and platform terms.
+      </p>
+
+      <div class="flex gap-5 text-xs font-semibold text-[#637068]">
+        <button onclick="openModal('privacy-modal')" class="hover:text-[#174c36] transition-colors">Privacy</button>
+        <button onclick="openModal('terms-modal')" class="hover:text-[#174c36] transition-colors">Terms</button>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Toast Notification -->
+  <div
+    id="toast-notification"
+    class="hidden animate-toast fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#142019] px-5 py-3 text-sm font-semibold whitespace-nowrap text-white shadow-2xl"
+  >
+    <svg id="toast-icon-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m5 12 4 4L19 6" />
+    </svg>
+    <svg id="toast-icon-alert" class="hidden text-amber-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="12" y1="8" x2="12" y2="12"></line>
+      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+    </svg>
+    <span id="toast-message">Notification</span>
+  </div>
+
+  <!-- Supported Sites Modal -->
+  <div id="supported-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="relative w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl animate-reveal sm:p-8">
+      <div class="flex items-center justify-between pb-4 border-b border-[#e6eae6]">
+        <div>
+          <h3 class="text-xl font-bold tracking-tight text-[#18201c]">Supported Sites</h3>
+          <p class="text-xs text-[#718078] mt-0.5">Over 1,000+ streaming and social platforms supported</p>
+        </div>
+        <button onclick="closeModal('supported-modal')" class="size-8 grid place-items-center rounded-full bg-[#f0f2ef] text-[#718078] hover:text-[#174c36]">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="my-4">
+        <input
+          id="supported-search-input"
+          type="text"
+          placeholder="Search site (e.g. YouTube, TikTok, SoundCloud)..."
+          class="w-full rounded-xl bg-[#f3f5f2] px-4 py-2.5 text-sm outline-none ring-1 ring-inset ring-[#e8ece8] focus:ring-2 focus:ring-[#174c36]"
+          oninput="filterSupportedSites(this.value)"
+        />
+      </div>
+
+      <div id="supported-sites-list" class="max-h-[300px] overflow-y-auto space-y-2 pr-1">
+        <!-- Injected via JavaScript -->
+      </div>
+
+      <div class="mt-5 pt-4 border-t border-[#e6eae6] flex justify-end">
+        <button onclick="closeModal('supported-modal')" class="px-5 py-2 rounded-xl bg-[#174c36] text-white text-xs font-semibold hover:bg-[#1d6044]">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Language Switcher Modal -->
+  <div id="language-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="relative w-full max-w-sm rounded-[24px] bg-white p-6 shadow-2xl animate-reveal">
+      <div class="flex items-center justify-between pb-3 border-b border-[#e6eae6]">
+        <h3 class="text-lg font-bold text-[#18201c]">Select Language</h3>
+        <button onclick="closeModal('language-modal')" class="size-8 grid place-items-center rounded-full bg-[#f0f2ef] text-[#718078] hover:text-[#174c36]">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="mt-4 space-y-1">
+        <button onclick="selectLanguage('en')" class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-between bg-[#edf3ee] text-[#174c36]">
+          <span>English (US)</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 4 4L19 6"/></svg>
+        </button>
+        <button onclick="selectLanguage('es')" class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-[#f3f5f2] text-[#33423a]">
+          <span>Español</span>
+        </button>
+        <button onclick="selectLanguage('fr')" class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-[#f3f5f2] text-[#33423a]">
+          <span>Français</span>
+        </button>
+        <button onclick="selectLanguage('de')" class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-[#f3f5f2] text-[#33423a]">
+          <span>Deutsch</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Privacy Policy Modal -->
+  <div id="privacy-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="relative w-full max-w-lg rounded-[24px] bg-white p-6 sm:p-8 shadow-2xl animate-reveal">
+      <h3 class="text-xl font-bold text-[#18201c] mb-3">Privacy Policy</h3>
+      <div class="text-sm text-[#526158] space-y-3 leading-relaxed max-h-[350px] overflow-y-auto pr-2">
+        <p><strong>1. No Logs Stored:</strong> QuickGrab does not track, save, or harvest your personal information, IP addresses, or browsing history.</p>
+        <p><strong>2. Temporary Storage:</strong> Any file processed on our servers is strictly stored temporarily for immediate download and automatically purged within 30 minutes.</p>
+        <p><strong>3. Safe & Secure:</strong> All connections to QuickGrab are encrypted over HTTPS. No accounts, cookies, or tracking pixels are required to use this tool.</p>
+      </div>
+      <div class="mt-6 flex justify-end">
+        <button onclick="closeModal('privacy-modal')" class="px-5 py-2.5 rounded-xl bg-[#174c36] text-white text-xs font-semibold hover:bg-[#1d6044]">
+          Got it
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terms of Service Modal -->
+  <div id="terms-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="relative w-full max-w-lg rounded-[24px] bg-white p-6 sm:p-8 shadow-2xl animate-reveal">
+      <h3 class="text-xl font-bold text-[#18201c] mb-3">Terms of Service</h3>
+      <div class="text-sm text-[#526158] space-y-3 leading-relaxed max-h-[350px] overflow-y-auto pr-2">
+        <p><strong>1. Lawful Use:</strong> You agree to use QuickGrab solely for personal, non-commercial purposes, or on materials you have the legitimate right, authorization, or license to download.</p>
+        <p><strong>2. Respect Creators:</strong> Please respect intellectual property rights and the terms of service of respective content platforms.</p>
+        <p><strong>3. Disclaimer:</strong> The service is provided "as is" without warranty of any kind, express or implied.</p>
+      </div>
+      <div class="mt-6 flex justify-end">
+        <button onclick="closeModal('terms-modal')" class="px-5 py-2.5 rounded-xl bg-[#174c36] text-white text-xs font-semibold hover:bg-[#1d6044]">
+          I Understand
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Client-side Application Script -->
+  <script>
+    // State management matching Figma design
+    const state = {
+      url: "",
+      mediaType: "video", // "video" | "audio"
+      quality: "1080p Full HD",
+      isPlaylist: false,
+      isAnalyzing: false,
+      analyzed: false,
+      mediaInfo: null,
+      downloadId: null,
+      downloadPollTimer: null,
+      isDownloading: false,
+      isMenuOpen: false,
+      supportedSitesData: []
+    };
+
+    const videoQualities = [
+      "1080p Full HD",
+      "720p HD",
+      "480p",
+      "Best available"
+    ];
+
+    const audioQualities = [
+      "320 kbps (High Quality)",
+      "192 kbps (Standard)",
+      "128 kbps (Compact)"
+    ];
+
+    // DOM References
+    const urlInput = document.getElementById("url-input");
+    const btnPaste = document.getElementById("btn-paste");
+    const btnFetch = document.getElementById("btn-fetch");
+    const fetchBtnText = document.getElementById("fetch-btn-text");
+    const fetchBtnIcon = document.getElementById("fetch-btn-icon");
+    const fetchBtnSpinner = document.getElementById("fetch-btn-spinner");
+
+    const resultCard = document.getElementById("result-card");
+    const thumbImg = document.getElementById("thumb-img");
+    const thumbGradient = document.getElementById("thumb-gradient");
+    const mediaBadge = document.getElementById("media-badge");
+    const mediaTitle = document.getElementById("media-title");
+    const mediaSubtitle = document.getElementById("media-subtitle");
+    const btnDownload = document.getElementById("btn-download");
+    const downloadBtnText = document.getElementById("download-btn-text");
+
+    const progressContainer = document.getElementById("progress-container");
+    const progressFill = document.getElementById("progress-fill");
+    const progressStatusText = document.getElementById("progress-status-text");
+    const progressMetricsText = document.getElementById("progress-metrics-text");
+    const progressFilename = document.getElementById("progress-filename");
+    const completeBanner = document.getElementById("complete-banner");
+    const btnSaveAgain = document.getElementById("btn-save-again");
+
+    const btnFormatVideo = document.getElementById("btn-format-video");
+    const btnFormatAudio = document.getElementById("btn-format-audio");
+    const playlistToggle = document.getElementById("playlist-toggle");
+    const playlistThumb = document.getElementById("playlist-thumb");
+    const qualitySelect = document.getElementById("quality-select");
+
+    const toast = document.getElementById("toast-notification");
+    const toastMessage = document.getElementById("toast-message");
+    const toastIconCheck = document.getElementById("toast-icon-check");
+    const toastIconAlert = document.getElementById("toast-icon-alert");
+
+    let toastTimer = null;
+
+    function showToast(message, isAlert = false) {
+      if (toastTimer) clearTimeout(toastTimer);
+      toastMessage.textContent = message;
+      if (isAlert) {
+        toastIconCheck.classList.add("hidden");
+        toastIconAlert.classList.remove("hidden");
+      } else {
+        toastIconCheck.classList.remove("hidden");
+        toastIconAlert.classList.add("hidden");
+      }
+      toast.classList.remove("hidden");
+      toastTimer = setTimeout(() => {
+        toast.classList.add("hidden");
+      }, 3000);
+    }
+
+    // Mobile navigation toggle
+    function toggleMobileMenu() {
+      state.isMenuOpen = !state.isMenuOpen;
+      const nav = document.getElementById("mobile-navigation");
+      const iconOpen = document.getElementById("icon-menu-open");
+      const iconClose = document.getElementById("icon-menu-close");
+      const btn = document.getElementById("btn-mobile-menu");
+
+      btn.setAttribute("aria-expanded", state.isMenuOpen ? "true" : "false");
+      if (state.isMenuOpen) {
+        nav.classList.remove("hidden");
+        iconOpen.classList.add("hidden");
+        iconClose.classList.remove("hidden");
+      } else {
+        nav.classList.add("hidden");
+        iconOpen.classList.remove("hidden");
+        iconClose.classList.add("hidden");
+      }
+    }
+
+    function closeMobileMenu() {
+      if (state.isMenuOpen) toggleMobileMenu();
+    }
+
+    // Paste handler with permission handling
+    async function handlePasteClick() {
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text && text.trim()) {
+            urlInput.value = text.trim();
+            state.url = text.trim();
+            hideResultCard();
+            showToast("Link pasted from clipboard");
+            // Auto detect playlist from URL
+            checkUrlForPlaylist(state.url);
+            // Automatically analyze
+            handleAnalyzeClick();
+            return;
+          }
         }
+      } catch (err) {
+        // Fallback for browsers with strict permissions
+      }
+      urlInput.focus();
+      showToast("Paste your link into the field", true);
+    }
 
-        // Initialize first option as selected
-        document.addEventListener('DOMContentLoaded', function() {
-            selectOption('single_video');
+    function checkUrlForPlaylist(url) {
+      if (url.includes("list=") || url.includes("/playlist") || url.includes("album")) {
+        if (!state.isPlaylist) {
+          togglePlaylist(true);
+          showToast("Playlist link detected!");
+        }
+      }
+    }
+
+    // Format selection
+    function setMediaType(type) {
+      state.mediaType = type;
+      if (type === "video") {
+        btnFormatVideo.className = "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all bg-white text-[#174c36] shadow-sm sm:flex-none";
+        btnFormatAudio.className = "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all text-[#748078] hover:text-[#33423a] sm:flex-none";
+        populateQualityDropdown(videoQualities, "1080p Full HD");
+      } else {
+        btnFormatAudio.className = "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all bg-white text-[#174c36] shadow-sm sm:flex-none";
+        btnFormatVideo.className = "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all text-[#748078] hover:text-[#33423a] sm:flex-none";
+        populateQualityDropdown(audioQualities, "192 kbps (Standard)");
+      }
+      updateResultSubtitle();
+    }
+
+    function populateQualityDropdown(options, defaultValue) {
+      qualitySelect.innerHTML = "";
+      options.forEach(opt => {
+        const el = document.createElement("option");
+        el.value = opt;
+        el.textContent = opt;
+        qualitySelect.appendChild(el);
+      });
+      qualitySelect.value = defaultValue;
+      state.quality = defaultValue;
+    }
+
+    function handleQualityChange(val) {
+      state.quality = val;
+      updateResultSubtitle();
+    }
+
+    // Playlist toggle
+    function togglePlaylist(forceValue) {
+      if (typeof forceValue === "boolean") {
+        state.isPlaylist = forceValue;
+      } else {
+        state.isPlaylist = !state.isPlaylist;
+      }
+
+      playlistToggle.setAttribute("aria-checked", state.isPlaylist ? "true" : "false");
+      if (state.isPlaylist) {
+        playlistToggle.className = "relative h-6 w-11 rounded-full bg-[#174c36] transition-colors focus:outline-none";
+        playlistThumb.className = "absolute left-1 top-1 size-4 rounded-full bg-white shadow-sm transition-transform translate-x-5";
+      } else {
+        playlistToggle.className = "relative h-6 w-11 rounded-full bg-[#d9ded9] transition-colors focus:outline-none";
+        playlistThumb.className = "absolute left-1 top-1 size-4 rounded-full bg-white shadow-sm transition-transform translate-x-0";
+      }
+
+      updateDownloadBtnText();
+      updateResultSubtitle();
+    }
+
+    function updateDownloadBtnText() {
+      downloadBtnText.textContent = state.isPlaylist ? "Download all" : "Download now";
+    }
+
+    function updateResultSubtitle() {
+      if (!state.mediaInfo) return;
+      const countOrTime = state.isPlaylist
+        ? `${state.mediaInfo.item_count || 1} items`
+        : (state.mediaInfo.duration_formatted || "12:48");
+      
+      const formatLabel = state.mediaType === "video" ? state.quality : `Audio (${state.quality})`;
+      mediaSubtitle.textContent = `${countOrTime} · ${formatLabel}`;
+    }
+
+    function hideResultCard() {
+      state.analyzed = false;
+      resultCard.classList.add("hidden");
+      progressContainer.classList.add("hidden");
+      completeBanner.classList.add("hidden");
+      if (state.downloadPollTimer) clearInterval(state.downloadPollTimer);
+    }
+
+    // Analyze URL
+    async function handleAnalyzeClick() {
+      const url = urlInput.value.trim();
+      if (!url) {
+        showToast("Enter a video link to continue", true);
+        urlInput.focus();
+        return;
+      }
+
+      state.url = url;
+      state.isAnalyzing = true;
+      hideResultCard();
+
+      // UI loading state
+      btnFetch.disabled = true;
+      fetchBtnText.textContent = "Analyzing…";
+      fetchBtnIcon.classList.add("hidden");
+      fetchBtnSpinner.classList.remove("hidden");
+
+      try {
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
         });
 
-        document.getElementById('downloadForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
+        const data = await res.json();
 
-            const url = document.getElementById('videoUrl').value.trim();
-            const downloadType = document.querySelector('input[name="downloadType"]:checked').value;
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Failed to analyze link");
+        }
 
-            if (!url) {
-                showError('Please enter a valid URL');
-                return;
-            }
+        state.mediaInfo = data;
+        state.analyzed = true;
 
-            // Reset UI
-            hideError();
-            document.getElementById('progressContainer').style.display = 'block';
-            document.getElementById('downloadBtn').disabled = true;
-            document.getElementById('downloadBtn').textContent = '⏳ Starting...';
-            document.getElementById('downloadLink').style.display = 'none';
+        // Auto toggle playlist if detected
+        if (data.is_playlist && !state.isPlaylist) {
+          togglePlaylist(true);
+        }
 
-            try {
-                const response = await fetch('/download', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        url: url,
-                        type: downloadType
-                    })
-                });
+        // Display results
+        mediaTitle.textContent = data.title;
+        mediaTitle.title = data.title;
 
-                const data = await response.json();
+        if (data.thumbnail) {
+          thumbImg.src = data.thumbnail;
+          thumbImg.classList.remove("hidden");
+          thumbGradient.classList.add("hidden");
+        } else {
+          thumbImg.classList.add("hidden");
+          thumbGradient.classList.remove("hidden");
+        }
 
-                if (response.ok) {
-                    currentDownloadId = data.download_id;
-                    startStatusCheck();
-                } else {
-                    showError(data.error || 'Download failed');
-                    resetUI();
-                }
-            } catch (error) {
-                showError('Network error: ' + error.message);
-                resetUI();
-            }
+        mediaBadge.textContent = state.isPlaylist
+          ? `${data.item_count} videos`
+          : data.duration_formatted;
+
+        updateResultSubtitle();
+        updateDownloadBtnText();
+
+        resultCard.classList.remove("hidden");
+        showToast("Video ready to download!");
+
+      } catch (err) {
+        showToast(err.message || "Could not analyze this link. Please check it.", true);
+      } finally {
+        state.isAnalyzing = false;
+        btnFetch.disabled = false;
+        fetchBtnText.textContent = "Grab video";
+        fetchBtnIcon.classList.remove("hidden");
+        fetchBtnSpinner.classList.add("hidden");
+      }
+    }
+
+    // Start Download
+    async function handleStartDownload() {
+      if (!state.url || !state.analyzed) return;
+
+      btnDownload.disabled = true;
+      downloadBtnText.textContent = "Preparing…";
+      progressContainer.classList.remove("hidden");
+      completeBanner.classList.add("hidden");
+      progressFill.style.width = "0%";
+      progressMetricsText.textContent = "0% · Starting...";
+      progressStatusText.innerHTML = `
+        <svg class="animate-spin text-[#174c36]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        Initializing download...
+      `;
+
+      try {
+        const res = await fetch("/api/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: state.url,
+            media_type: state.mediaType,
+            quality: state.quality,
+            is_playlist: state.isPlaylist,
+            title: state.mediaInfo ? state.mediaInfo.title : ""
+          })
         });
 
-        function startStatusCheck() {
-            statusInterval = setInterval(checkStatus, 1000);
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Failed to start download");
         }
 
-        async function checkStatus() {
-            if (!currentDownloadId) return;
+        state.downloadId = data.download_id;
+        state.isDownloading = true;
+        showToast("Your download is being prepared");
 
-            try {
-                const response = await fetch(`/status/${currentDownloadId}`);
-                const data = await response.json();
+        // Start polling progress
+        pollDownloadStatus(state.downloadId);
 
-                if (response.ok) {
-                    updateProgress(data);
+      } catch (err) {
+        showToast(err.message || "Failed to initiate download", true);
+        btnDownload.disabled = false;
+        updateDownloadBtnText();
+        progressContainer.classList.add("hidden");
+      }
+    }
 
-                    if (data.status === 'completed') {
-                        clearInterval(statusInterval);
-                        showDownloadLink();
-                    } else if (data.status === 'error') {
-                        clearInterval(statusInterval);
-                        showError(data.error || 'Download failed');
-                        resetUI();
-                    }
-                }
-            } catch (error) {
-                console.error('Status check failed:', error);
+    function pollDownloadStatus(downloadId) {
+      if (state.downloadPollTimer) clearInterval(state.downloadPollTimer);
+
+      state.downloadPollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/status/${downloadId}`);
+          if (!res.ok) throw new Error("Status query failed");
+
+          const data = await res.json();
+
+          if (data.status === "downloading" || data.status === "starting" || data.status === "processing") {
+            const pct = Math.max(0, Math.min(100, data.progress || 0));
+            progressFill.style.width = `${pct}%`;
+            
+            let metrics = `${pct.toFixed(0)}%`;
+            if (data.speed) metrics += ` · ${data.speed}`;
+            if (data.eta && data.eta !== "Live / Unknown") metrics += ` · ETA ${data.eta}`;
+            progressMetricsText.textContent = metrics;
+
+            if (data.filename) {
+              progressFilename.textContent = data.filename;
             }
-        }
 
-        function updateProgress(data) {
-            const progressText = document.getElementById('progressText');
-            const progressFill = document.getElementById('progressFill');
-
-            if (data.status === 'downloading') {
-                progressText.textContent = `Downloading... ${Math.round(data.progress)}%`;
-                progressFill.style.width = `${data.progress}%`;
-            } else if (data.status === 'completed') {
-                progressText.textContent = 'Download completed! 🎉';
-                progressFill.style.width = '100%';
+            if (data.status === "processing") {
+              progressStatusText.innerHTML = `
+                <svg class="animate-spin text-[#174c36]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                Processing & converting media...
+              `;
             } else {
-                progressText.textContent = 'Processing...';
+              progressStatusText.innerHTML = `
+                <svg class="animate-spin text-[#174c36]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                Downloading media...
+              `;
             }
-        }
+          } else if (data.status === "completed") {
+            clearInterval(state.downloadPollTimer);
+            state.isDownloading = false;
+            progressFill.style.width = "100%";
+            progressMetricsText.textContent = "100% · Done";
+            progressStatusText.innerHTML = `
+              <svg class="text-[#2b7354]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m5 12 4 4L19 6" />
+              </svg>
+              Complete!
+            `;
 
-        function showDownloadLink() {
-            document.getElementById('downloadLink').style.display = 'block';
-            const downloadBtn = document.getElementById('downloadFileBtn');
-            downloadBtn.href = `/download/${currentDownloadId}`;
+            btnDownload.disabled = false;
+            updateDownloadBtnText();
 
-            // Handle download and cleanup
-            downloadBtn.addEventListener('click', function(e) {
-                // Don't prevent default - let browser handle the download
-                setTimeout(() => {
-                    cleanup();
-                }, 3000); // Cleanup after 3 seconds
-            }, { once: true }); // Only add listener once
-        }
+            // Show complete banner
+            completeBanner.classList.remove("hidden");
+            btnSaveAgain.href = data.download_url;
 
-        function showError(message) {
-            const errorDiv = document.getElementById('errorMessage');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-        }
+            // Trigger browser download
+            const iframe = document.createElement("iframe");
+            iframe.style.display = "none";
+            iframe.src = data.download_url;
+            document.body.appendChild(iframe);
+            setTimeout(() => iframe.remove(), 10000);
 
-        function hideError() {
-            document.getElementById('errorMessage').style.display = 'none';
-        }
+            showToast("Download complete! Saving to your device...");
 
-        function resetUI() {
-            document.getElementById('downloadBtn').disabled = false;
-            document.getElementById('downloadBtn').textContent = '🚀 Start Download';
-            document.getElementById('progressContainer').style.display = 'none';
+          } else if (data.status === "error" || data.status === "cancelled") {
+            clearInterval(state.downloadPollTimer);
+            state.isDownloading = false;
+            btnDownload.disabled = false;
+            updateDownloadBtnText();
+            progressContainer.classList.add("hidden");
+            showToast(data.error || "Download failed. Please try again.", true);
+          }
+        } catch (err) {
+          // Network hiccup, keep polling
         }
+      }, 750);
+    }
 
-        async function cleanup() {
-            if (currentDownloadId) {
-                try {
-                    await fetch(`/cleanup/${currentDownloadId}`, {
-                        method: 'POST'
-                    });
-                } catch (error) {
-                    console.error('Cleanup failed:', error);
-                }
-                currentDownloadId = null;
-            }
-            resetUI();
+    async function cancelCurrentDownload() {
+      if (!state.downloadId) return;
+      if (state.downloadPollTimer) clearInterval(state.downloadPollTimer);
+      try {
+        await fetch(`/api/cancel/${state.downloadId}`, { method: "POST" });
+      } catch (e) {}
+      state.isDownloading = false;
+      btnDownload.disabled = false;
+      updateDownloadBtnText();
+      progressContainer.classList.add("hidden");
+      showToast("Download cancelled");
+    }
+
+    // Modal helpers
+    function openModal(id) {
+      document.getElementById(id).classList.remove("hidden");
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.add("hidden");
+    }
+
+    function toggleLanguageModal() {
+      openModal("language-modal");
+    }
+
+    function selectLanguage(lang) {
+      closeModal("language-modal");
+      showToast("Language set to " + (lang === "en" ? "English" : lang.toUpperCase()));
+    }
+
+    async function openSupportedModal() {
+      openModal("supported-modal");
+      const listEl = document.getElementById("supported-sites-list");
+      if (state.supportedSitesData.length === 0) {
+        listEl.innerHTML = "<p class='text-xs text-[#718078] py-4 text-center'>Loading supported sites...</p>";
+        try {
+          const res = await fetch("/api/supported-sites");
+          const data = await res.json();
+          state.supportedSitesData = data.sites || [];
+          renderSupportedSites(state.supportedSitesData);
+        } catch (err) {
+          listEl.innerHTML = "<p class='text-xs text-rose-500 py-4 text-center'>Failed to load sites.</p>";
         }
-    </script>
+      } else {
+        renderSupportedSites(state.supportedSitesData);
+      }
+    }
+
+    function renderSupportedSites(sites) {
+      const listEl = document.getElementById("supported-sites-list");
+      listEl.innerHTML = "";
+      if (sites.length === 0) {
+        listEl.innerHTML = "<p class='text-xs text-[#718078] py-4 text-center'>No matching sites found.</p>";
+        return;
+      }
+      sites.forEach(site => {
+        const row = document.createElement("div");
+        row.className = "flex items-center justify-between p-3 rounded-xl hover:bg-[#f3f5f2] transition-colors border border-transparent hover:border-[#e8ece8]";
+        row.innerHTML = `
+          <div>
+            <span class="font-bold text-sm text-[#142019]">${site.name}</span>
+            <span class="text-[11px] text-[#718078] block">${site.category}</span>
+          </div>
+          <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#edf3ee] text-[#174c36]">${site.badge}</span>
+        `;
+        listEl.appendChild(row);
+      });
+    }
+
+    function filterSupportedSites(keyword) {
+      const q = keyword.toLowerCase().trim();
+      const filtered = state.supportedSitesData.filter(s =>
+        s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q)
+      );
+      renderSupportedSites(filtered);
+    }
+
+    // Keyboard support: Enter key in input triggers Fetch Video
+    urlInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleAnalyzeClick();
+      }
+    });
+
+    urlInput.addEventListener("input", (e) => {
+      if (state.analyzed) {
+        hideResultCard();
+      }
+      checkUrlForPlaylist(e.target.value);
+    });
+
+    // Close modals on escape key
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        closeModal("supported-modal");
+        closeModal("language-modal");
+        closeModal("privacy-modal");
+        closeModal("terms-modal");
+      }
+    });
+  </script>
 </body>
 </html>
