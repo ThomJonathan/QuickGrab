@@ -1,8 +1,9 @@
 FROM python:3.11-slim
 
-# Install system dependencies including ffmpeg
+# Install system dependencies including ffmpeg and nodejs (for JS challenge solving)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    nodejs \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*

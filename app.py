@@ -42,8 +42,8 @@ BASE_YTDL_OPTS: Dict[str, Any] = {
     "no_warnings": True,
     "force_ipv4": True,
     "socket_timeout": 30,
-    "retries": 10,
-    "fragment_retries": 10,
+    "retries": 3,
+    "fragment_retries": 3,
     "check_formats": False,
     "http_headers": {
         "User-Agent": (
@@ -55,10 +55,10 @@ BASE_YTDL_OPTS: Dict[str, Any] = {
         "Accept-Language": "en-US,en;q=0.9",
         "Sec-Fetch-Mode": "navigate",
     },
-    # Use robust client chain (Android + iOS bypass bot challenges without skipping manifests)
+    # TV and mobile embedded clients avoid datacenter IP bot detection walls
     "extractor_args": {
         "youtube": {
-            "player_client": ["android", "ios", "mweb", "web"],
+            "player_client": ["tv_embedded", "tv", "android", "ios", "mweb", "web"],
         }
     },
 }
@@ -447,10 +447,10 @@ def analyze_url():
 
     # Progressive client fallback to bypass cloud IP bot checks
     fallback_clients = [
-        ["android", "ios", "mweb", "web"],
-        ["ios", "mweb"],
+        ["tv_embedded", "tv"],
         ["android"],
-        ["tv_embedded"],
+        ["ios", "mweb"],
+        ["web"],
     ]
 
     for client_list in fallback_clients:
