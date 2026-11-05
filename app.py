@@ -86,7 +86,8 @@ if YT_COOKIES_ENV:
         print(f"Failed to write YOUTUBE_COOKIES env: {e}")
 
 # 2. Check if a local cookies file exists in workspace
-COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+# Check if a custom-named token file exists in workspace
+COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yt_session_config.dat")
 if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
     BASE_YTDL_OPTS["cookiefile"] = COOKIES_FILE
     print(f"Loaded YouTube cookies from {COOKIES_FILE}")
