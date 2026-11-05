@@ -44,9 +44,10 @@ BASE_YTDL_OPTS: Dict[str, Any] = {
     "socket_timeout": 30,
     "retries": 10,
     "fragment_retries": 10,
+    "check_formats": False,
     "http_headers": {
         "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/124.0.0.0 Safari/537.36"
         ),
@@ -54,19 +55,41 @@ BASE_YTDL_OPTS: Dict[str, Any] = {
         "Accept-Language": "en-US,en;q=0.9",
         "Sec-Fetch-Mode": "navigate",
     },
-    # Youtube player clients to avoid bot detection
+    # Use robust client chain (Android + iOS bypass bot challenges without skipping manifests)
     "extractor_args": {
         "youtube": {
-            "player_client": ["web", "android"],
-            "skip": ["dash", "hls"],
+            "player_client": ["android", "ios", "mweb", "web"],
         }
     },
 }
 
-# If a cookies file is placed in workspace (e.g. cookies.txt), use it automatically
+# 1. Check if cookies are supplied via Environment Variable (ideal for Render deployment)
+YT_COOKIES_ENV = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_CONTENT")
+if YT_COOKIES_ENV:
+    cookie_dest = os.path.join(DOWNLOAD_DIR, "yt_cookies.txt")
+    try:
+        import base64
+        # Support either raw Netscape cookie text or base64-encoded cookie text
+        if "\n" in YT_COOKIES_ENV or "\t" in YT_COOKIES_ENV:
+            cookie_text = YT_COOKIES_ENV
+        else:
+            try:
+                cookie_text = base64.b64decode(YT_COOKIES_ENV).decode("utf-8")
+            except Exception:
+                cookie_text = YT_COOKIES_ENV
+
+        with open(cookie_dest, "w", encoding="utf-8") as f:
+            f.write(cookie_text)
+        BASE_YTDL_OPTS["cookiefile"] = cookie_dest
+        print(f"Loaded YouTube cookies from environment variable into {cookie_dest}")
+    except Exception as e:
+        print(f"Failed to write YOUTUBE_COOKIES env: {e}")
+
+# 2. Check if a local cookies file exists in workspace
 COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
-if os.path.exists(COOKIES_FILE):
+if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
     BASE_YTDL_OPTS["cookiefile"] = COOKIES_FILE
+    print(f"Loaded YouTube cookies from {COOKIES_FILE}")
 
 
 def sanitize_filename(name: str) -> str:
@@ -193,16 +216,16 @@ def ytdl_postprocessor_hook(d: Dict[str, Any], task: DownloadTask):
 
 
 def get_video_format_string(quality: str) -> str:
-    """Map user-selected quality to a robust yt-dlp format string."""
+    """Map user-selected quality to a robust yt-dlp format string with universal fallback."""
     q_lower = quality.lower()
     if "1080" in q_lower:
-        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best/all"
     elif "720" in q_lower:
-        return "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+        return "bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best/all"
     elif "480" in q_lower:
-        return "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+        return "bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/best/all"
     else:  # Best available or default
-        return "bestvideo+bestaudio/best"
+        return "bestvideo+bestaudio/best/all"
 
 
 def get_audio_bitrate(quality: str) -> str:
@@ -239,7 +262,7 @@ def run_download_thread(task: DownloadTask):
 
             if task.media_type == "audio":
                 bitrate = get_audio_bitrate(task.quality)
-                ydl_opts["format"] = "bestaudio/best"
+                ydl_opts["format"] = "bestaudio/best/all"
                 ydl_opts["postprocessors"] = [
                     {
                         "key": "FFmpegExtractAudio",
@@ -292,7 +315,7 @@ def run_download_thread(task: DownloadTask):
 
             if task.media_type == "audio":
                 bitrate = get_audio_bitrate(task.quality)
-                ydl_opts["format"] = "bestaudio/best"
+                ydl_opts["format"] = "bestaudio/best/all"
                 ydl_opts["outtmpl"] = os.path.join(session_dir, "%(title)s.%(ext)s")
                 ydl_opts["postprocessors"] = [
                     {
@@ -407,17 +430,73 @@ def analyze_url():
     if not url:
         return jsonify({"success": False, "error": "Please provide a valid URL"}), 400
 
-    ydl_opts = dict(BASE_YTDL_OPTS)
-    ydl_opts["extract_flat"] = "in_playlist"
-    ydl_opts["skip_download"] = True
+    info = None
+    last_error = None
+
+    # Progressive client fallback to bypass cloud IP bot checks
+    fallback_clients = [
+        ["android", "ios", "mweb", "web"],
+        ["ios", "mweb"],
+        ["android"],
+        ["tv_embedded"],
+    ]
+
+    for client_list in fallback_clients:
+        try:
+            ydl_opts = dict(BASE_YTDL_OPTS)
+            ydl_opts["extract_flat"] = "in_playlist"
+            ydl_opts["skip_download"] = True
+            ydl_opts["check_formats"] = False
+            ydl_opts["format"] = "bestvideo+bestaudio/best/all"
+
+            if "extractor_args" in ydl_opts and "youtube" in ydl_opts["extractor_args"]:
+                ydl_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": client_list,
+                    }
+                }
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+            except Exception as inner_e:
+                if "format is not available" in str(inner_e).lower():
+                    # Fallback to pure flat extraction without checking formats
+                    ydl_opts["extract_flat"] = True
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=False)
+                else:
+                    raise inner_e
+
+            if info:
+                break
+        except Exception as e:
+            last_error = e
+            # Only retry alternative clients if challenged by bot detection
+            if "Sign in to confirm" not in str(e) and "bot" not in str(e).lower():
+                break
+
+    if not info and last_error:
+        err_msg = str(last_error)
+        if "Sign in to confirm you’re not a bot" in err_msg or "cookies" in err_msg.lower():
+            friendly_err = (
+                "YouTube requires authentication for this link from cloud hosting IPs. "
+                "You can export your YouTube cookies and set the YOUTUBE_COOKIES environment variable in Render."
+            )
+        elif "is not a valid URL" in err_msg:
+            friendly_err = "The link entered is not valid. Please check and try again."
+        elif "Private video" in err_msg:
+            friendly_err = "This video is private or restricted."
+        elif "Unsupported URL" in err_msg:
+            friendly_err = "This website is not currently supported or the link format is invalid."
+        else:
+            friendly_err = f"Could not analyze video: {err_msg.split(';')[-1].strip()}"
+        return jsonify({"success": False, "error": friendly_err}), 400
+
+    if not info:
+        return jsonify({"success": False, "error": "Could not retrieve media details."}), 400
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-        if not info:
-            return jsonify({"success": False, "error": "Could not retrieve media details."}), 400
-
         is_playlist = info.get("_type") == "playlist" or "entries" in info
         title = info.get("title") or "Unknown Title"
         thumbnail = info.get("thumbnail") or ""
@@ -446,16 +525,7 @@ def analyze_url():
         })
 
     except Exception as e:
-        err_msg = str(e)
-        if "is not a valid URL" in err_msg:
-            friendly_err = "The link entered is not valid. Please check and try again."
-        elif "Private video" in err_msg:
-            friendly_err = "This video is private or restricted."
-        elif "Unsupported URL" in err_msg:
-            friendly_err = "This website is not currently supported or the link format is invalid."
-        else:
-            friendly_err = f"Could not analyze video: {err_msg.split(';')[-1].strip()}"
-        return jsonify({"success": False, "error": friendly_err}), 400
+        return jsonify({"success": False, "error": f"Error parsing media details: {str(e)}"}), 400
 
 
 @app.route("/api/download", methods=["POST"])
