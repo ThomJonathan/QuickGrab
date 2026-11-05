@@ -245,8 +245,20 @@ def run_download_thread(task: DownloadTask):
 
     try:
         ydl_opts = dict(BASE_YTDL_OPTS)
+
+        # Explicitly re-check and force cookiefile in worker scope
+        env_cookie_path = os.path.join(DOWNLOAD_DIR, "yt_cookies.txt")
+        local_cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+
+        if os.path.exists(env_cookie_path) and os.path.getsize(env_cookie_path) > 0:
+            ydl_opts["cookiefile"] = env_cookie_path
+        elif os.path.exists(local_cookie_path) and os.path.getsize(local_cookie_path) > 0:
+            ydl_opts["cookiefile"] = local_cookie_path
+
         ydl_opts["progress_hooks"] = [lambda d: ytdl_progress_hook(d, task)]
         ydl_opts["postprocessor_hooks"] = [lambda d: ytdl_postprocessor_hook(d, task)]
+
+        # (Rest of your download logic remains the same...)
 
         if task.is_playlist:
             # Playlist settings

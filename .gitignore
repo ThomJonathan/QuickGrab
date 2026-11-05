@@ -19,3 +19,7 @@ ENV/
 *.log
 bin/
 node_modules/
+
+cookies.txt
+
+.venv/
