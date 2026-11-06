@@ -27,6 +27,7 @@ Designed according to the Figma design specifications with DM Sans typography, f
 
 ### 1. Requirements
 - Python 3.10+
+- Deno or a supported Node.js runtime (for YouTube JavaScript challenges)
 - FFmpeg (for video muxing and audio conversion to MP3)
   - On macOS: `brew install ffmpeg`
   - On Ubuntu/Debian: `sudo apt update && sudo apt install -y ffmpeg`
@@ -44,6 +45,8 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 ```
+
+`requirements.txt` installs `yt-dlp[default]`, including yt-dlp's JavaScript challenge components. The app enables Deno and Node.js as runtime candidates. Install Deno locally with `brew install deno` (or install a supported Node.js runtime); the Render build script and Docker image install Deno automatically.
 
 ### 3. Run the Development Server
 ```bash
@@ -122,6 +125,16 @@ Replace `chrome` with a browser supported by yt-dlp; an optional profile can be 
 For Render or another host, add `YOUTUBE_COOKIES` as a secret environment variable containing a Netscape-format cookie export, or its base64-encoded text. `YOUTUBE_COOKIES_FILE` is useful when a cookie file is mounted securely; do not rely on `YOUTUBE_COOKIES_FROM_BROWSER` on a headless server without that browser profile. The legacy `COOKIES_CONTENT` environment variable is also accepted.
 
 The app prioritizes cookie environment variables, then an explicitly configured browser, then local cookie files. It copies file/content cookies into a private temporary file for each operation and removes that copy afterward.
+
+### YouTube player-response errors
+
+If YouTube reports that yt-dlp failed to extract a player response, update the project dependencies and restart/redeploy the app so the latest yt-dlp and JavaScript challenge components are installed:
+
+```bash
+pip install --upgrade "yt-dlp[default]"
+```
+
+Confirm that Deno or a supported Node.js runtime is available to the running app. YouTube changes can temporarily break extraction even when dependencies are current; if the error continues, check the yt-dlp issue tracker or retry later. Cookies do not fix every player-response failure, and a hosting provider may still be blocked by YouTube.
 
 ### Keep cookie exports private
 

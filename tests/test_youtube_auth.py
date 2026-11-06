@@ -10,6 +10,9 @@ import app
 
 COOKIE_TEXT = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tTEST_COOKIE\tfake-value\n"
 BOT_ERROR = "ERROR: [youtube] Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies"
+PLAYER_RESPONSE_ERROR = (
+    "ERROR: [youtube] Failed to extract any player response; please report this issue"
+)
 
 
 class YoutubeCookieOptionsTests(unittest.TestCase):
@@ -40,6 +43,12 @@ class YoutubeCookieOptionsTests(unittest.TestCase):
                 self.assertFalse(os.path.exists(temporary_cookie_file))
                 with open(source, encoding="utf-8") as cookie_file:
                     self.assertEqual(cookie_file.read(), "local-cookie-data")
+
+    def test_yt_dlp_uses_default_clients_and_javascript_runtimes(self):
+        self.assertNotIn("extractor_args", app.BASE_YTDL_OPTS)
+        self.assertNotIn("http_headers", app.BASE_YTDL_OPTS)
+        with app.yt_dlp.YoutubeDL(dict(app.BASE_YTDL_OPTS)) as ydl:
+            self.assertEqual(ydl.params.get("js_runtimes"), {"deno": {}, "node": {}})
 
     def test_configured_browser_is_used_when_no_cookie_file_is_configured(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -163,7 +172,9 @@ class YoutubeAuthIntegrationTests(unittest.TestCase):
         options = FakeYoutubeDL.instances[0].options
         self.assertTrue(options["cookiefile"])
         self.assertFalse(os.path.exists(options["cookiefile"]))
+        self.assertEqual(options["js_runtimes"], {"deno": {}, "node": {}})
         self.assertNotIn("extractor_args", options)
+        self.assertNotIn("http_headers", options)
 
     def test_download_uses_configured_cookie_copy_and_reports_bot_challenge(self):
         FakeYoutubeDL.download_error = RuntimeError(BOT_ERROR)
@@ -176,8 +187,22 @@ class YoutubeAuthIntegrationTests(unittest.TestCase):
 
         options = FakeYoutubeDL.instances[0].options
         self.assertFalse(os.path.exists(options["cookiefile"]))
+        self.assertEqual(options["js_runtimes"], {"deno": {}, "node": {}})
         self.assertEqual(task.status, "error")
         self.assertIn("YOUTUBE_COOKIES", task.error_msg)
+
+    def test_download_reports_player_response_failure_with_recovery_guidance(self):
+        FakeYoutubeDL.download_error = RuntimeError(PLAYER_RESPONSE_ERROR)
+        task = app.DownloadTask(
+            "player-error-download", "https://www.youtube.com/watch?v=example", "video", "720p", False
+        )
+
+        with patch.dict(os.environ, {}, clear=True):
+            app.run_download_thread(task)
+
+        self.assertEqual(task.status, "error")
+        self.assertIn("yt-dlp", task.error_msg)
+        self.assertIn("JavaScript", task.error_msg)
 
     def test_playlist_bot_challenge_is_not_silently_ignored(self):
         FakeYoutubeDL.download_error = RuntimeError(BOT_ERROR)
@@ -202,6 +227,17 @@ class YoutubeAuthIntegrationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("YOUTUBE_COOKIES", response.get_json()["error"])
+
+    def test_analysis_reports_player_response_failure_with_recovery_guidance(self):
+        FakeYoutubeDL.extract_error = RuntimeError(PLAYER_RESPONSE_ERROR)
+        with patch.dict(os.environ, {}, clear=True):
+            response = app.app.test_client().post(
+                "/api/analyze", json={"url": "https://www.youtube.com/watch?v=example"}
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("yt-dlp", response.get_json()["error"])
+        self.assertIn("JavaScript", response.get_json()["error"])
 
 
 if __name__ == "__main__":

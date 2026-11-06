@@ -1,4 +1,4 @@
 Flask>=3.0.0
-yt-dlp>=2026.10.26
+yt-dlp[default]>=2026.10.26
 Werkzeug>=3.0.0
 gunicorn>=21.2.0

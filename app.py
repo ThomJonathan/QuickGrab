@@ -47,25 +47,10 @@ BASE_YTDL_OPTS: Dict[str, Any] = {
     "no_warnings": True,
     "force_ipv4": True,
     "socket_timeout": 30,
-    "retries": 10,
-    "fragment_retries": 10,
+    "retries": 3,
+    "fragment_retries": 3,
     "check_formats": False,
-    "http_headers": {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Fetch-Mode": "navigate",
-    },
-    # Force Android and iOS client signatures to bypass server-side IP blocks
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["android", "ios"],
-        }
-    },
+    "js_runtimes": {"deno": {}, "node": {}},
 }
 
 LOCAL_COOKIE_FILES = (
@@ -151,6 +136,19 @@ YOUTUBE_AUTH_ERROR = (
     "Netscape cookie export, or use YOUTUBE_COOKIES_FROM_BROWSER locally. YouTube may still "
     "reject requests from hosted server IPs even with valid cookies."
 )
+
+
+def is_youtube_player_response_error(error: Exception) -> bool:
+    return "failed to extract any player response" in str(error).lower()
+
+
+def youtube_player_response_error_message(error: Exception) -> str:
+    return (
+        "yt-dlp could not extract YouTube's player response. Update yt-dlp and its JavaScript "
+        "components with `pip install --upgrade 'yt-dlp[default]'`, and ensure Deno or Node.js "
+        "is installed. If this persists on the latest version, check yt-dlp's issue tracker and "
+        f"retry later. Details: {error}"
+    )
 
 
 def sanitize_filename(name: str) -> str:
@@ -439,6 +437,8 @@ def run_download_thread(task: DownloadTask):
                 task.error_msg = "This video is private or unavailable."
             elif is_youtube_auth_error(e):
                 task.error_msg = YOUTUBE_AUTH_ERROR
+            elif is_youtube_player_response_error(e):
+                task.error_msg = youtube_player_response_error_message(e)
             elif "not a valid URL" in err:
                 task.error_msg = "The provided URL is not valid."
             else:
@@ -525,6 +525,8 @@ def analyze_url():
         err_msg = str(last_error)
         if is_youtube_auth_error(last_error) or "cookies" in err_msg.lower():
             friendly_err = YOUTUBE_AUTH_ERROR
+        elif is_youtube_player_response_error(last_error):
+            friendly_err = youtube_player_response_error_message(last_error)
         elif "is not a valid URL" in err_msg:
             friendly_err = "The link entered is not valid. Please check and try again."
         elif "Private video" in err_msg:

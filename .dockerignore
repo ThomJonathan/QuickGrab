@@ -4,6 +4,6 @@
 venv/
 __pycache__/
 downloads/
+bin/
 .env
 *cookies*.txt
-yt_session_config.dat
