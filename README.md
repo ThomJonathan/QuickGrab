@@ -103,5 +103,26 @@ In Render Dashboard, select **New +** → **Blueprint** and point to your reposi
 
 ---
 
-## 🔒 Optional Cookies for Restricted / Age-Gated Videos
-If you encounter bot checks or age-gated videos on certain platforms, you can place a standard `cookies.txt` file in the project root directory. `app.py` will automatically detect and use it for yt-dlp requests.
+## 🔒 YouTube Sign-In Checks
+
+YouTube may require sign-in verification for a video or block requests from a hosting provider's IP address. Cookies can help when the video requires an authenticated session, but they do not guarantee that YouTube will allow a request from a hosted server.
+
+### Local development
+
+Use a browser profile that is already signed in to YouTube:
+
+```bash
+YOUTUBE_COOKIES_FROM_BROWSER=chrome python3 app.py
+```
+
+Replace `chrome` with a browser supported by yt-dlp; an optional profile can be included, for example `firefox:default`. Alternatively, set `YOUTUBE_COOKIES_FILE` to the path of a Netscape-format cookie export. For backwards compatibility, the app also checks root-level `cookies.txt` and `yt_session_config.dat` files when no environment cookie or browser is configured.
+
+### Hosted deployments
+
+For Render or another host, add `YOUTUBE_COOKIES` as a secret environment variable containing a Netscape-format cookie export, or its base64-encoded text. `YOUTUBE_COOKIES_FILE` is useful when a cookie file is mounted securely; do not rely on `YOUTUBE_COOKIES_FROM_BROWSER` on a headless server without that browser profile. The legacy `COOKIES_CONTENT` environment variable is also accepted.
+
+The app prioritizes cookie environment variables, then an explicitly configured browser, then local cookie files. It copies file/content cookies into a private temporary file for each operation and removes that copy afterward.
+
+### Keep cookie exports private
+
+Cookie exports can grant access to your account. Never commit or share them, and do not put them in the Docker image. The repository ignores common cookie-export filenames and the Docker build excludes them, but ignore rules do not remove a file already tracked by Git. Treat any cookie file shared or committed—including the legacy `yt_session_config.dat`—as compromised: revoke the affected Google sessions, remove the file from the repository and its Git history if it was committed, and only then create a fresh cookie export if needed. Avoid publishing cookie values in logs or support requests.

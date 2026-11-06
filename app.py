@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 import sys
@@ -5,9 +6,11 @@ import time
 import uuid
 import shutil
 import zipfile
+import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Iterator, Optional
 
 from flask import (
     Flask,
@@ -22,8 +25,10 @@ import yt_dlp
 
 app = Flask(__name__)
 
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Base downloads directory
-DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
+DOWNLOAD_DIR = os.path.join(APP_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Prepend local bin directory to PATH if present (used for Render static ffmpeg)
@@ -36,7 +41,7 @@ if os.path.exists(LOCAL_BIN):
 downloads_lock = threading.Lock()
 download_tasks: Dict[str, "DownloadTask"] = {}
 
-# Common options for yt-dlp to ensure stability, bypass common blocks, and avoid bot detection
+# Common yt-dlp options. Authentication is added per operation below.
 BASE_YTDL_OPTS: Dict[str, Any] = {
     "quiet": True,
     "no_warnings": True,
@@ -45,52 +50,91 @@ BASE_YTDL_OPTS: Dict[str, Any] = {
     "retries": 3,
     "fragment_retries": 3,
     "check_formats": False,
-    "http_headers": {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Fetch-Mode": "navigate",
-    },
-    # TV and mobile embedded clients avoid datacenter IP bot detection walls
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["tv_embedded", "tv", "android", "ios", "mweb", "web"],
-        }
-    },
 }
 
-# 1. Check if cookies are supplied via Environment Variable (ideal for Render deployment)
-YT_COOKIES_ENV = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_CONTENT")
-if YT_COOKIES_ENV:
-    cookie_dest = os.path.join(DOWNLOAD_DIR, "yt_cookies.txt")
+LOCAL_COOKIE_FILES = (
+    os.path.join(APP_DIR, "cookies.txt"),
+    os.path.join(APP_DIR, "yt_session_config.dat"),
+    os.path.join(DOWNLOAD_DIR, "yt_cookies.txt"),
+)
+
+
+def _decode_cookie_environment(value: str) -> str:
+    """Accept raw Netscape cookie text or its base64-encoded form."""
+    if "\n" in value or "\t" in value:
+        return value
+
     try:
-        import base64
-        # Support either raw Netscape cookie text or base64-encoded cookie text
-        if "\n" in YT_COOKIES_ENV or "\t" in YT_COOKIES_ENV:
-            cookie_text = YT_COOKIES_ENV
-        else:
+        decoded = base64.b64decode(value, validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return value
+    return decoded if "\t" in decoded else value
+
+
+def _read_cookie_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as cookie_file:
+        return cookie_file.read()
+
+
+@contextmanager
+def youtube_ydl_options(
+    base_options: Optional[Dict[str, Any]] = None,
+) -> Iterator[Dict[str, Any]]:
+    """Yield yt-dlp options with an isolated cookie copy for this operation."""
+    options = dict(base_options or BASE_YTDL_OPTS)
+    temporary_cookie_file = None
+
+    cookie_text = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_CONTENT")
+    cookie_file_path = os.environ.get("YOUTUBE_COOKIES_FILE")
+    browser_spec = os.environ.get("YOUTUBE_COOKIES_FROM_BROWSER", "").strip()
+
+    if cookie_text:
+        cookie_text = _decode_cookie_environment(cookie_text)
+    elif cookie_file_path:
+        cookie_text = _read_cookie_file(os.path.expanduser(cookie_file_path))
+    elif browser_spec:
+        options["cookiesfrombrowser"] = tuple(browser_spec.split(":", 3))
+    else:
+        for candidate in LOCAL_COOKIE_FILES:
+            if os.path.isfile(candidate) and os.path.getsize(candidate) > 0:
+                cookie_text = _read_cookie_file(candidate)
+                break
+
+    if cookie_text:
+        descriptor, temporary_cookie_file = tempfile.mkstemp(
+            prefix="yt-dlp-cookies-", suffix=".txt"
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as cookie_file:
+                cookie_file.write(cookie_text)
+        except Exception:
             try:
-                cookie_text = base64.b64decode(YT_COOKIES_ENV).decode("utf-8")
-            except Exception:
-                cookie_text = YT_COOKIES_ENV
+                os.unlink(temporary_cookie_file)
+            except OSError:
+                pass
+            raise
+        options["cookiefile"] = temporary_cookie_file
 
-        with open(cookie_dest, "w", encoding="utf-8") as f:
-            f.write(cookie_text)
-        BASE_YTDL_OPTS["cookiefile"] = cookie_dest
-        print(f"Loaded YouTube cookies from environment variable into {cookie_dest}")
-    except Exception as e:
-        print(f"Failed to write YOUTUBE_COOKIES env: {e}")
+    try:
+        yield options
+    finally:
+        if temporary_cookie_file:
+            try:
+                os.unlink(temporary_cookie_file)
+            except FileNotFoundError:
+                pass
 
-# 2. Check if a local cookies file exists in workspace
-# Check if a custom-named token file exists in workspace
-COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yt_session_config.dat")
-if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-    BASE_YTDL_OPTS["cookiefile"] = COOKIES_FILE
-    print(f"Loaded YouTube cookies from {COOKIES_FILE}")
+
+def is_youtube_auth_error(error: Exception) -> bool:
+    message = str(error).lower().replace("’", "'")
+    return "sign in to confirm" in message or "not a bot" in message
+
+
+YOUTUBE_AUTH_ERROR = (
+    "YouTube requires sign-in verification for this request. Set YOUTUBE_COOKIES to a fresh "
+    "Netscape cookie export, or use YOUTUBE_COOKIES_FROM_BROWSER locally. YouTube may still "
+    "reject requests from hosted server IPs even with valid cookies."
+)
 
 
 def sanitize_filename(name: str) -> str:
@@ -247,15 +291,6 @@ def run_download_thread(task: DownloadTask):
     try:
         ydl_opts = dict(BASE_YTDL_OPTS)
 
-        # Explicitly re-check and force cookiefile in worker scope
-        env_cookie_path = os.path.join(DOWNLOAD_DIR, "yt_cookies.txt")
-        local_cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
-
-        if os.path.exists(env_cookie_path) and os.path.getsize(env_cookie_path) > 0:
-            ydl_opts["cookiefile"] = env_cookie_path
-        elif os.path.exists(local_cookie_path) and os.path.getsize(local_cookie_path) > 0:
-            ydl_opts["cookiefile"] = local_cookie_path
-
         ydl_opts["progress_hooks"] = [lambda d: ytdl_progress_hook(d, task)]
         ydl_opts["postprocessor_hooks"] = [lambda d: ytdl_postprocessor_hook(d, task)]
 
@@ -265,7 +300,6 @@ def run_download_thread(task: DownloadTask):
             # Playlist settings
             ydl_opts["noplaylist"] = False
             ydl_opts["yes_playlist"] = True
-            ydl_opts["ignoreerrors"] = True
 
             target_files_dir = os.path.join(session_dir, "files")
             os.makedirs(target_files_dir, exist_ok=True)
@@ -288,8 +322,9 @@ def run_download_thread(task: DownloadTask):
                 ydl_opts["merge_output_format"] = "mp4"
 
             # Execute playlist download
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([task.url])
+            with youtube_ydl_options(ydl_opts) as operation_opts:
+                with yt_dlp.YoutubeDL(operation_opts) as ydl:
+                    ydl.download([task.url])
 
             if task.cancelled:
                 return
@@ -342,8 +377,9 @@ def run_download_thread(task: DownloadTask):
                 ydl_opts["outtmpl"] = os.path.join(session_dir, "%(title)s.%(ext)s")
                 ydl_opts["merge_output_format"] = "mp4"
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([task.url])
+            with youtube_ydl_options(ydl_opts) as operation_opts:
+                with yt_dlp.YoutubeDL(operation_opts) as ydl:
+                    ydl.download([task.url])
 
             if task.cancelled:
                 return
@@ -385,8 +421,8 @@ def run_download_thread(task: DownloadTask):
             # Make errors user-friendly
             if "Private video" in err:
                 task.error_msg = "This video is private or unavailable."
-            elif "Sign in to confirm you’re not a bot" in err:
-                task.error_msg = "Platform requested bot verification. Please try again shortly or use another link."
+            elif is_youtube_auth_error(e):
+                task.error_msg = YOUTUBE_AUTH_ERROR
             elif "not a valid URL" in err:
                 task.error_msg = "The provided URL is not valid."
             else:
@@ -446,56 +482,33 @@ def analyze_url():
     info = None
     last_error = None
 
-    # Progressive client fallback to bypass cloud IP bot checks
-    fallback_clients = [
-        ["tv_embedded", "tv"],
-        ["android"],
-        ["ios", "mweb"],
-        ["web"],
-    ]
+    ydl_opts = dict(BASE_YTDL_OPTS)
+    ydl_opts["extract_flat"] = "in_playlist"
+    ydl_opts["skip_download"] = True
+    ydl_opts["check_formats"] = False
+    ydl_opts["format"] = "bestvideo+bestaudio/best/all"
 
-    for client_list in fallback_clients:
+    try:
         try:
-            ydl_opts = dict(BASE_YTDL_OPTS)
-            ydl_opts["extract_flat"] = "in_playlist"
-            ydl_opts["skip_download"] = True
-            ydl_opts["check_formats"] = False
-            ydl_opts["format"] = "bestvideo+bestaudio/best/all"
-
-            if "extractor_args" in ydl_opts and "youtube" in ydl_opts["extractor_args"]:
-                ydl_opts["extractor_args"] = {
-                    "youtube": {
-                        "player_client": client_list,
-                    }
-                }
-
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with youtube_ydl_options(ydl_opts) as operation_opts:
+                with yt_dlp.YoutubeDL(operation_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
-            except Exception as inner_e:
-                if "format is not available" in str(inner_e).lower():
-                    # Fallback to pure flat extraction without checking formats
-                    ydl_opts["extract_flat"] = True
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
-                else:
-                    raise inner_e
+        except Exception as inner_error:
+            if "format is not available" not in str(inner_error).lower():
+                raise
 
-            if info:
-                break
-        except Exception as e:
-            last_error = e
-            # Only retry alternative clients if challenged by bot detection
-            if "Sign in to confirm" not in str(e) and "bot" not in str(e).lower():
-                break
+            # Retry only the format-independent flat extraction fallback.
+            ydl_opts["extract_flat"] = True
+            with youtube_ydl_options(ydl_opts) as operation_opts:
+                with yt_dlp.YoutubeDL(operation_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+    except Exception as error:
+        last_error = error
 
     if not info and last_error:
         err_msg = str(last_error)
-        if "Sign in to confirm you’re not a bot" in err_msg or "cookies" in err_msg.lower():
-            friendly_err = (
-                "YouTube requires authentication for this link from cloud hosting IPs. "
-                "You can export your YouTube cookies and set the YOUTUBE_COOKIES environment variable in Render."
-            )
+        if is_youtube_auth_error(last_error) or "cookies" in err_msg.lower():
+            friendly_err = YOUTUBE_AUTH_ERROR
         elif "is not a valid URL" in err_msg:
             friendly_err = "The link entered is not valid. Please check and try again."
         elif "Private video" in err_msg:

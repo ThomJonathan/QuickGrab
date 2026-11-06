@@ -1,0 +1,9 @@
+.git/
+.idea/
+.venv/
+venv/
+__pycache__/
+downloads/
+.env
+*cookies*.txt
+yt_session_config.dat

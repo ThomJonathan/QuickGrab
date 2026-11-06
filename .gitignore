@@ -20,6 +20,8 @@ ENV/
 bin/
 node_modules/
 
-cookies.txt
+# YouTube session credentials
+*cookies*.txt
+yt_session_config.dat
 
 .venv/
