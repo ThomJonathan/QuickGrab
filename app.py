@@ -47,9 +47,25 @@ BASE_YTDL_OPTS: Dict[str, Any] = {
     "no_warnings": True,
     "force_ipv4": True,
     "socket_timeout": 30,
-    "retries": 3,
-    "fragment_retries": 3,
+    "retries": 10,
+    "fragment_retries": 10,
     "check_formats": False,
+    "http_headers": {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Mode": "navigate",
+    },
+    # Force Android and iOS client signatures to bypass server-side IP blocks
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android", "ios"],
+        }
+    },
 }
 
 LOCAL_COOKIE_FILES = (
